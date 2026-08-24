@@ -14954,32 +14954,37 @@ class="fixed z-40 inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-ce
       window.Admin.closeRoleAssignmentModal = closeRoleAssignmentModal;
       window.Admin.toggleEmailInput = toggleEmailInput;
       window.Admin.validateNewUserPassword = validateNewUserPassword;
-      if (typeof openBulkImportModal !== 'undefined') window.Admin.openBulkImportModal = openBulkImportModal;
-      if (typeof closeBulkImportModal !== 'undefined') window.Admin.closeBulkImportModal = closeBulkImportModal;
-      if (typeof toggleImportMethod !== 'undefined') window.Admin.toggleImportMethod = toggleImportMethod;
-      if (typeof handleFileSelect !== 'undefined') window.Admin.handleFileSelect = handleFileSelect;
-      if (typeof validateJsonInput !== 'undefined') window.Admin.validateJsonInput = validateJsonInput;
-      if (typeof toggleValidationGuide !== 'undefined') window.Admin.toggleValidationGuide = toggleValidationGuide;
-      if (typeof togglePreviewDetails !== 'undefined') window.Admin.togglePreviewDetails = togglePreviewDetails;
-      if (typeof submitBulkImport !== 'undefined') window.Admin.submitBulkImport = submitBulkImport;
-      if (typeof toggleBulkImportDropdown !== 'undefined') window.Admin.toggleBulkImportDropdown = toggleBulkImportDropdown;
-      if (typeof toggleDropdownImportMethod !== 'undefined') window.Admin.toggleDropdownImportMethod = toggleDropdownImportMethod;
-      if (typeof handleDropdownFileSelect !== 'undefined') window.Admin.handleDropdownFileSelect = handleDropdownFileSelect;
-      if (typeof validateDropdownJson !== 'undefined') window.Admin.validateDropdownJson = validateDropdownJson;
-      if (typeof validateDropdownData !== 'undefined') window.Admin.validateDropdownData = validateDropdownData;
-      if (typeof showDropdownStatus !== 'undefined') window.Admin.showDropdownStatus = showDropdownStatus;
-      if (typeof showDropdownResults !== 'undefined') window.Admin.showDropdownResults = showDropdownResults;
-      if (typeof showDropdownFailedTools !== 'undefined') window.Admin.showDropdownFailedTools = showDropdownFailedTools;
-      if (typeof showDropdownActionButtons !== 'undefined') window.Admin.showDropdownActionButtons = showDropdownActionButtons;
-      if (typeof resetDropdownImport !== 'undefined') window.Admin.resetDropdownImport = resetDropdownImport;
-      if (typeof submitDropdownImport !== 'undefined') window.Admin.submitDropdownImport = submitDropdownImport;
-      if (typeof performDropdownImport !== 'undefined') window.Admin.performDropdownImport = performDropdownImport;
-      if (typeof downloadSampleJSON !== 'undefined') window.Admin.downloadSampleJSON = downloadSampleJSON;
-      if (typeof openCreateTeamModal !== 'undefined') window.Admin.openCreateTeamModal = openCreateTeamModal;
-      if (typeof closeCreateTeamModal !== 'undefined') window.Admin.closeCreateTeamModal = closeCreateTeamModal;
-      if (typeof loadTeamMembersView !== 'undefined') window.Admin.loadTeamMembersView = loadTeamMembersView;
-      if (typeof approveJoinRequest !== 'undefined') window.Admin.approveJoinRequest = approveJoinRequest;
-      if (typeof rejectJoinRequest !== 'undefined') window.Admin.rejectJoinRequest = rejectJoinRequest;
+      // These helpers are defined inside a DOMContentLoaded callback in an earlier
+      // script block, so they do not exist yet at parse time — register them after
+      // the DOM (and their definitions) are ready.
+      document.addEventListener('DOMContentLoaded', function () {
+        if (typeof openBulkImportModal !== 'undefined') window.Admin.openBulkImportModal = openBulkImportModal;
+        if (typeof closeBulkImportModal !== 'undefined') window.Admin.closeBulkImportModal = closeBulkImportModal;
+        if (typeof toggleImportMethod !== 'undefined') window.Admin.toggleImportMethod = toggleImportMethod;
+        if (typeof handleFileSelect !== 'undefined') window.Admin.handleFileSelect = handleFileSelect;
+        if (typeof validateJsonInput !== 'undefined') window.Admin.validateJsonInput = validateJsonInput;
+        if (typeof toggleValidationGuide !== 'undefined') window.Admin.toggleValidationGuide = toggleValidationGuide;
+        if (typeof togglePreviewDetails !== 'undefined') window.Admin.togglePreviewDetails = togglePreviewDetails;
+        if (typeof submitBulkImport !== 'undefined') window.Admin.submitBulkImport = submitBulkImport;
+        if (typeof toggleBulkImportDropdown !== 'undefined') window.Admin.toggleBulkImportDropdown = toggleBulkImportDropdown;
+        if (typeof toggleDropdownImportMethod !== 'undefined') window.Admin.toggleDropdownImportMethod = toggleDropdownImportMethod;
+        if (typeof handleDropdownFileSelect !== 'undefined') window.Admin.handleDropdownFileSelect = handleDropdownFileSelect;
+        if (typeof validateDropdownJson !== 'undefined') window.Admin.validateDropdownJson = validateDropdownJson;
+        if (typeof validateDropdownData !== 'undefined') window.Admin.validateDropdownData = validateDropdownData;
+        if (typeof showDropdownStatus !== 'undefined') window.Admin.showDropdownStatus = showDropdownStatus;
+        if (typeof showDropdownResults !== 'undefined') window.Admin.showDropdownResults = showDropdownResults;
+        if (typeof showDropdownFailedTools !== 'undefined') window.Admin.showDropdownFailedTools = showDropdownFailedTools;
+        if (typeof showDropdownActionButtons !== 'undefined') window.Admin.showDropdownActionButtons = showDropdownActionButtons;
+        if (typeof resetDropdownImport !== 'undefined') window.Admin.resetDropdownImport = resetDropdownImport;
+        if (typeof submitDropdownImport !== 'undefined') window.Admin.submitDropdownImport = submitDropdownImport;
+        if (typeof performDropdownImport !== 'undefined') window.Admin.performDropdownImport = performDropdownImport;
+        if (typeof downloadSampleJSON !== 'undefined') window.Admin.downloadSampleJSON = downloadSampleJSON;
+        if (typeof openCreateTeamModal !== 'undefined') window.Admin.openCreateTeamModal = openCreateTeamModal;
+        if (typeof closeCreateTeamModal !== 'undefined') window.Admin.closeCreateTeamModal = closeCreateTeamModal;
+        if (typeof loadTeamMembersView !== 'undefined') window.Admin.loadTeamMembersView = loadTeamMembersView;
+        if (typeof approveJoinRequest !== 'undefined') window.Admin.approveJoinRequest = approveJoinRequest;
+        if (typeof rejectJoinRequest !== 'undefined') window.Admin.rejectJoinRequest = rejectJoinRequest;
+      });
     </script>
         </main>
       </div>
