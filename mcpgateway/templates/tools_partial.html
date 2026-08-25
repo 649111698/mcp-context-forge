@@ -2,18 +2,18 @@
 <table id="tools-table" class="min-w-full divide-y divide-gray-200">
   <thead class="bg-gray-50 dark:bg-gray-700">
     <tr>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-48">Actions</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-12">S. No.</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-24">Tool ID</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-36">Source</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-24">Name</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-12">Request Type</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Description</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-24">Annotations</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Tags</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Owner</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Team</th>
-      <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Status</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-48">Actions</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">S. No.</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Tool ID</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-36">Source</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Name</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">Request Type</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider">Description</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Annotations</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Tags</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Owner</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Team</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Status</th>
     </tr>
   </thead>
   <tbody
@@ -22,8 +22,8 @@
   >
     {% for tool in data %}
       {% set can_modify = is_admin or tool.ownerEmail == current_user_email or (tool.visibility == 'team' and tool.teamId and user_team_roles.get(tool.teamId|string) == 'owner') %}
-      <tr data-enabled="{{ tool.enabled|lower }}" data-owner-email="{{ tool.ownerEmail }}" data-team-id="{{ tool.teamId or '' }}" data-visibility="{{ tool.visibility }}">
-        <td class="px-2 py-4 whitespace-nowrap text-sm font-medium w-32">
+      <tr class="transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40" data-enabled="{{ tool.enabled|lower }}" data-owner-email="{{ tool.ownerEmail }}" data-team-id="{{ tool.teamId or '' }}" data-visibility="{{ tool.visibility }}">
+        <td class="px-2 py-2.5 whitespace-nowrap text-sm font-medium w-32 align-middle">
           <div class="relative"
                x-data="overflowMenu('tools-table-wrapper')"
                @click.away="menuOpen = false"
@@ -125,39 +125,51 @@
           </div>
         </td>
         <td
-          class="px-2 py-4 whitespace-nowrap text-sm font-medium text-gray-900 w-12 dark:text-gray-100"
+          class="px-3 py-2.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500 tabular-nums w-12"
         >
           {{ (pagination.page - 1) * pagination.per_page + loop.index }}
         </td>
-        <td class="px-2 py-4 whitespace-normal break-all text-sm font-medium text-gray-900 dark:text-gray-300 max-w-32">{{ tool.id }}</td>
-        <td class="px-2 py-4 text-sm w-36">
-          <div class="font-medium text-gray-900 dark:text-gray-100">{{ tool.gatewaySlug }}</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400" title="{{ tool.url }}" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all;">{{ tool.url }}</div>
+        <td class="px-3 py-2.5 w-20">
+          <span
+            class="inline-block font-mono text-[11px] text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700/70 rounded px-1.5 py-0.5"
+            title="{{ tool.id }}"
+            >{{ tool.id[:8] }}</span
+          >
+        </td>
+        <td class="px-3 py-2.5 text-sm w-44">
+          <div class="font-medium text-gray-900 dark:text-gray-100 truncate">{{ tool.gatewaySlug or 'REST' }}</div>
+          <div class="font-mono text-[11px] text-gray-400 dark:text-gray-500 truncate" title="{{ tool.url }}">{{ tool.url }}</div>
         </td>
         <td
-          class="px-2 py-4 whitespace-nowrap text-sm font-medium text-gray-900 w-24 dark:text-gray-100"
+          class="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100 w-28"
         >
-          <div>{{ tool.name }}</div>
+          <div class="truncate" title="{{ tool.name }}">{{ tool.name }}</div>
           {% if tool.title %}
-          <div class="text-xs text-gray-500 dark:text-gray-400 font-normal">{{ tool.title }}</div>
+          <div class="text-[11px] text-gray-400 dark:text-gray-500 font-normal truncate">{{ tool.title }}</div>
           {% endif %}
         </td>
-        <td
-          class="px-2 py-4 whitespace-normal break-words text-sm text-gray-500 dark:text-gray-300 w-12"
-        >
-          {{ tool.requestType }}
+        <td class="px-3 py-2.5 w-16">
+          {% set m = tool.requestType %}
+          <span
+            class="inline-flex items-center justify-center px-2 py-0.5 rounded font-mono text-[11px] font-semibold tracking-wide
+            {% if m == 'GET' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300
+            {% elif m == 'POST' %}bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300
+            {% elif m == 'PUT' %}bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300
+            {% elif m == 'PATCH' %}bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300
+            {% elif m == 'DELETE' %}bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300
+            {% else %}bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300{% endif %}"
+            >{{ m }}</span
+          >
         </td>
-        <td
-          class="px-2 py-3 text-sm text-gray-500 dark:text-gray-300 align-top"
-        >
+        <td class="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 max-w-md">
           {% set clean_desc = (tool.description or "") | decode_html | replace('\n', ' ') |
           replace('\r', ' ') %} {% set refactor_desc = clean_desc | striptags |
           trim %}
-          <div title="{{ refactor_desc }}" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-width:36rem;word-break:break-all;">
-            {{ refactor_desc[:400] }}{% if refactor_desc | length is greaterthan 400 %}…{% endif %}
-          </div>
+          <p class="truncate" title="{{ refactor_desc }}">
+            {{ refactor_desc[:300] }}{% if refactor_desc | length is greaterthan 300 %}…{% endif %}
+          </p>
         </td>
-        <td class="px-2 py-4 whitespace-normal break-words">
+        <td class="px-3 py-2.5 whitespace-nowrap">
           {% if tool.annotations %} {% if tool.annotations.readOnlyHint %}
           <span
             class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 mr-1 mb-1"
@@ -182,31 +194,38 @@
           <span class="text-gray-500 dark:text-gray-300 text-xs">None</span>
           {% endif %}
         </td>
-        <td class="px-2 py-4 whitespace-nowrap">
-          {% if tool.tags %} {% for tag in tool.tags %}
+        <td class="px-3 py-2.5 whitespace-nowrap">
+          {% if tool.tags %} {% for tag in tool.tags[:2] %}
           <span
-            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-1 mb-1"
+            class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 mr-1 mb-1"
             data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}"
             >{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}</span
           >
-          {% endfor %} {% else %}
-          <span class="text-gray-500 dark:text-gray-300 text-xs">None</span>
+          {% endfor %} {% if tool.tags | length > 2 %}
+          <span
+            class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300 mb-1"
+            title="{% for t in tool.tags[2:] %}{% if t is mapping %}{{ t.id }}{% else %}{{ t }}{% endif %} {% endfor %}"
+            >+{{ tool.tags | length - 2 }}</span
+          >
+          {% endif %} {% else %}
+          <span class="text-gray-400 dark:text-gray-500 text-xs">—</span>
           {% endif %}
         </td>
         <td
-          class="px-2 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 w-20"
+          class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20"
+          title="{{ tool.ownerEmail }}"
         >
-          {{ tool.ownerEmail }}
+          {{ tool.ownerEmail.split('@')[0] if tool.ownerEmail else '—' }}
         </td>
         <td
-          class="px-2 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 w-20"
+          class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20"
         >
-          {% if tool.team %}{{ tool.team }}{% else %}<span
-            class="text-gray-400 dark:text-gray-600 text-xs"
-            >None</span
+          {% if tool.team %}<span class="truncate inline-block max-w-full" title="{{ tool.team }}">{{ tool.team }}</span>{% else %}<span
+            class="text-gray-300 dark:text-gray-600 text-xs"
+            >—</span
           >{% endif %}
         </td>
-        <td class="px-2 py-4 whitespace-nowrap text-sm w-20">
+        <td class="px-3 py-2.5 whitespace-nowrap text-sm w-24">
           <div class="flex flex-col gap-1">
             <!-- Type badge -->
             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 w-fit">{{ tool.integrationType }}</span>
