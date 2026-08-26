@@ -1267,3 +1267,48 @@ html.dark ::-webkit-scrollbar-thumb {
 html.dark ::-webkit-scrollbar-thumb:hover {
     background: #595959;
 }
+
+/* ===== Compact density layer =============================================
+   Buttons ~28px, inputs ~30px, cards 16px padding - antd small-ish scale
+   for the admin console. Overrides the py-2/px-4 and p-6 utility sizes. */
+
+/* Large buttons (py-2 px-4 / px-4 py-2 family) */
+button[class*="py-2 px-4"],
+button[class*="px-4 py-2"] {
+    padding: 4px 12px !important;
+    font-size: 13px !important;
+    line-height: 18px !important;
+}
+
+/* Medium buttons (px-3 py-2 family) */
+button[class*="px-3 py-2"],
+button[class*="py-2 px-3"] {
+    padding: 4px 10px !important;
+    font-size: 13px !important;
+    line-height: 18px !important;
+}
+
+/* Inputs / selects / textareas: compact height */
+input[class*="focus:border-indigo-500"]:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="button"]):not([type="submit"]),
+select[class*="focus:border-indigo-500"],
+textarea[class*="focus:border-indigo-500"] {
+    padding: 4px 10px !important;
+    font-size: 13px !important;
+}
+
+/* Form labels: tighten */
+main label[class*="text-sm"][class*="font-medium"] {
+    font-size: 13px !important;
+    margin-bottom: 2px !important;
+}
+
+/* Section cards: 24px -> 16px padding, 20px bottom gap */
+main div[class*="shadow rounded-lg p-6"] {
+    padding: 16px !important;
+    margin-bottom: 20px !important;
+}
+
+/* Modal panels: tighten desktop padding */
+div[class*="px-4 pt-5 pb-4"][class*="sm:p-6"] {
+    padding: 16px !important;
+}
