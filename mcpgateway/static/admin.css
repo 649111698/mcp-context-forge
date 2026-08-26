@@ -1149,3 +1149,11 @@ body.htmx-request .htmx-indicator {
 body.htmx-request .htmx-indicator.htmx-request {
     visibility: visible;
 }
+
+/* ===== Entity tables: constrain width on large screens =====
+   Tables use table-fixed with header-driven column widths; the wrapper
+   cap keeps them from stretching edge-to-edge on wide monitors. */
+[id$="-table-wrapper"],
+[id$="-pagination-controls"] {
+    max-width: 1600px;
+}

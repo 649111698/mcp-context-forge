@@ -1,18 +1,17 @@
 <!-- htmlhint doctype-first:false -->
-<table id="agents-table" class="min-w-full divide-y divide-gray-200">
+<table id="agents-table" class="w-full table-fixed divide-y divide-gray-200">
   <thead class="bg-gray-50 dark:bg-gray-700">
     <tr>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-48">Actions</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-14">Actions</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">S. No.</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Agent ID</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Agent ID</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16">ID Type</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-32">Name</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Name</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider">Description</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-48">Endpoint</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Tags</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Type</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Status</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Reachability</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-40">Endpoint</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Tags</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Type</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Status</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Owner</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Team</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Visibility</th>
@@ -150,11 +149,11 @@
         <td class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-24">
           <span class="truncate inline-block max-w-full" title="{{ agent.agentType }}">{{ agent.agentType or '—' }}</span>
         </td>
-        <td class="px-3 py-2.5 whitespace-nowrap text-sm w-24">
-          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium w-fit {% if agent.enabled %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% endif %}">{% if agent.enabled %}● Active{% else %}● Inactive{% endif %}</span>
-        </td>
-        <td class="px-3 py-2.5 whitespace-nowrap text-sm w-24">
-          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium w-fit {% if agent.reachable %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% endif %}">{% if agent.reachable %}● Reachable{% else %}● Unreachable{% endif %}</span>
+        <td class="px-3 py-2.5 whitespace-nowrap text-sm w-28">
+          <div class="flex flex-col gap-1">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium w-fit {% if agent.enabled %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% endif %}">{% if agent.enabled %}● Active{% else %}● Inactive{% endif %}</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium w-fit {% if agent.reachable %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% endif %}">{% if agent.reachable %}● Reachable{% else %}● Unreachable{% endif %}</span>
+          </div>
         </td>
         <td class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20" title="{{ agent.ownerEmail }}">
           {{ agent.ownerEmail.split('@')[0] if agent.ownerEmail else '—' }}
