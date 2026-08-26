@@ -3,16 +3,16 @@
   <thead class="bg-gray-50 dark:bg-gray-700">
     <tr>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-14">Actions</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">S. No.</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12 hidden min-[1340px]:table-cell">S. No.</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Tool ID</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-40">Source</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Name</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16">Request Type</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider">Description</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Annotations</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20 hidden min-[1340px]:table-cell">Annotations</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Tags</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Owner</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Team</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20 hidden min-[1340px]:table-cell">Team</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Status</th>
     </tr>
   </thead>
@@ -125,7 +125,7 @@
           </div>
         </td>
         <td
-          class="px-3 py-2.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500 tabular-nums w-12"
+          class="px-3 py-2.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500 tabular-nums w-12 hidden min-[1340px]:table-cell"
         >
           {{ (pagination.page - 1) * pagination.per_page + loop.index }}
         </td>
@@ -169,7 +169,7 @@
             {{ refactor_desc[:300] }}{% if refactor_desc | length is greaterthan 300 %}…{% endif %}
           </p>
         </td>
-        <td class="px-3 py-2.5 whitespace-nowrap">
+        <td class="px-3 py-2.5 whitespace-nowrap hidden min-[1340px]:table-cell">
           {% if tool.annotations %} {% if tool.annotations.readOnlyHint %}
           <span
             class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 mr-1 mb-1"
@@ -218,7 +218,7 @@
           {{ tool.ownerEmail.split('@')[0] if tool.ownerEmail else '—' }}
         </td>
         <td
-          class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20"
+          class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20 hidden min-[1340px]:table-cell"
         >
           {% if tool.team %}<span class="truncate inline-block max-w-full" title="{{ tool.team }}">{{ tool.team }}</span>{% else %}<span
             class="text-gray-300 dark:text-gray-600 text-xs"

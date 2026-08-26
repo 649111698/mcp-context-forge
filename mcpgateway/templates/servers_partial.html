@@ -3,16 +3,16 @@
   <thead class="bg-gray-50 dark:bg-gray-700">
     <tr>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-14">Actions</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">Icon</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">S. No.</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12 hidden min-[1355px]:table-cell">Icon</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12 hidden min-[1355px]:table-cell">S. No.</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Server ID</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-32">Name</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16">Auth</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16 hidden min-[1355px]:table-cell">Auth</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider">Description</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-14">Tools</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16">Resources</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-14">Prompts</th>
-      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Tags</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28 hidden min-[1355px]:table-cell">Tags</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Owner</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Team</th>
       <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Visibility</th>
@@ -126,21 +126,21 @@
         </div>
       </div>
     </td>
-    <td class="px-3 py-2.5 whitespace-nowrap w-12">
+    <td class="px-3 py-2.5 whitespace-nowrap w-12 hidden min-[1355px]:table-cell">
       {% if server.icon %}
       <img src="{{ server.icon }}" alt="{{ server.name }} Icon" class="h-7 w-7 rounded" />
       {% else %}
       <span class="text-gray-300 dark:text-gray-600 text-xs">—</span>
       {% endif %}
     </td>
-    <td class="px-3 py-2.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500 tabular-nums w-12">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
+    <td class="px-3 py-2.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500 tabular-nums w-12 hidden min-[1355px]:table-cell">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
     <td class="px-3 py-2.5 w-20">
       <span class="inline-block font-mono text-[11px] text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700/70 rounded px-1.5 py-0.5" title="{{ server.id }}">{{ server.id[:8] }}</span>
     </td>
     <td class="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100 w-32">
       <div class="truncate" title="{{ server.name }}">{{ server.name }}</div>
     </td>
-    <td class="px-3 py-2.5 whitespace-nowrap text-sm w-16">
+    <td class="px-3 py-2.5 whitespace-nowrap text-sm w-16 hidden min-[1355px]:table-cell">
       {% if server.oauthEnabled %}
       <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">OAuth</span>
       {% else %}
@@ -172,7 +172,7 @@
       <span class="text-gray-300 dark:text-gray-600">0</span>
       {% endif %}
     </td>
-    <td class="px-3 py-2.5 whitespace-nowrap">
+    <td class="px-3 py-2.5 whitespace-nowrap hidden min-[1355px]:table-cell">
       {% if server.tags %}
         {% for tag in server.tags[:2] %}
         <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 mr-1 mb-1" data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}">
