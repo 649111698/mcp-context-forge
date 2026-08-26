@@ -2,20 +2,20 @@
 <table id="servers-table" class="min-w-full divide-y divide-gray-200">
   <thead class="bg-gray-50 dark:bg-gray-700">
     <tr>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Icon</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">S. No.</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Server ID</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Auth</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Description</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Tools</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Resources</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Prompts</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Tags</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Owner</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Team</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Visibility</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-48">Actions</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">Icon</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">S. No.</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Server ID</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-32">Name</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16">Auth</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider">Description</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16">Tools</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Resources</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-16">Prompts</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Tags</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Owner</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Team</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Visibility</th>
     </tr>
   </thead>
   <tbody id="servers-table-body" data-testid="server-list" class="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-700">
@@ -40,8 +40,8 @@
   {% for server in data %}
   {% set server_label = server.name or server.id %}
   {% set can_modify = is_admin or server.ownerEmail == current_user_email or (server.visibility == 'team' and server.teamId and user_team_roles.get(server.teamId|string) == 'owner') %}
-  <tr data-testid="server-item" data-enabled="{{ server.enabled|lower }}" data-owner-email="{{ server.ownerEmail }}" data-team-id="{{ server.teamId or '' }}" data-visibility="{{ server.visibility }}">
-    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+  <tr data-testid="server-item" class="transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40" data-enabled="{{ server.enabled|lower }}" data-owner-email="{{ server.ownerEmail }}" data-team-id="{{ server.teamId or '' }}" data-visibility="{{ server.visibility }}">
+    <td class="px-2 py-2.5 whitespace-nowrap text-sm font-medium w-32 align-middle">
       <div class="relative"
            x-data="overflowMenu('servers-table-wrapper')"
                @click.away="menuOpen = false"
@@ -126,75 +126,81 @@
         </div>
       </div>
     </td>
-    <td class="px-6 py-4 whitespace-nowrap">
+    <td class="px-3 py-2.5 whitespace-nowrap w-12">
       {% if server.icon %}
-      <img src="{{ server.icon }}" alt="{{ server.name }} Icon" class="h-8 w-8" />
+      <img src="{{ server.icon }}" alt="{{ server.name }} Icon" class="h-7 w-7 rounded" />
       {% else %}
-      <span class="text-gray-500 dark:text-gray-300">N/A</span>
+      <span class="text-gray-300 dark:text-gray-600 text-xs">—</span>
       {% endif %}
     </td>
-    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-300">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
-    <td class="px-6 py-4 whitespace-normal break-all text-sm font-medium text-gray-900 dark:text-gray-300 max-w-32">{{ server.id }}</td>
-    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-300">{{ server.name }}</td>
-    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
+    <td class="px-3 py-2.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500 tabular-nums w-12">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
+    <td class="px-3 py-2.5 w-20">
+      <span class="inline-block font-mono text-[11px] text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700/70 rounded px-1.5 py-0.5" title="{{ server.id }}">{{ server.id[:8] }}</span>
+    </td>
+    <td class="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100 w-32">
+      <div class="truncate" title="{{ server.name }}">{{ server.name }}</div>
+    </td>
+    <td class="px-3 py-2.5 whitespace-nowrap text-sm w-16">
       {% if server.oauthEnabled %}
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">OAuth</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">OAuth</span>
       {% else %}
-      <span class="text-gray-500 dark:text-gray-400 text-xs">—</span>
+      <span class="text-gray-300 dark:text-gray-600 text-xs">—</span>
       {% endif %}
     </td>
-    <td class="px-6 py-4 whitespace-normal break-words text-sm text-gray-500 dark:text-gray-300">{{ server.description | decode_html }}</td>
-    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
+    <td class="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 max-w-md">
+      {% set clean_desc = (server.description or '') | decode_html | replace('\n', ' ') | replace('\r', ' ') %} {% set refactor_desc = clean_desc | striptags | trim %}
+      <p class="truncate" title="{{ refactor_desc }}">{{ refactor_desc[:300] }}{% if refactor_desc | length is greaterthan 300 %}…{% endif %}</p>
+    </td>
+    <td class="px-3 py-2.5 whitespace-nowrap text-xs tabular-nums w-16">
       {% if server.associatedTools %}
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">{{ server.associatedTools | length }} tool{{ 's' if server.associatedTools | length != 1 else '' }}</span>
+      <span class="font-medium text-green-700 dark:text-green-300" title="{{ server.associatedTools | length }} tools">{{ server.associatedTools | length }}</span>
       {% else %}
-      <span class="text-gray-500 dark:text-gray-400 text-xs">0 tools</span>
+      <span class="text-gray-300 dark:text-gray-600">0</span>
       {% endif %}
     </td>
-    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
+    <td class="px-3 py-2.5 whitespace-nowrap text-xs tabular-nums w-20">
       {% if server.associatedResources %}
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">{{ server.associatedResources | length }} resource{{ 's' if server.associatedResources | length != 1 else '' }}</span>
+      <span class="font-medium text-blue-700 dark:text-blue-300" title="{{ server.associatedResources | length }} resources">{{ server.associatedResources | length }}</span>
       {% else %}
-      <span class="text-gray-500 dark:text-gray-400 text-xs">0 resources</span>
+      <span class="text-gray-300 dark:text-gray-600">0</span>
       {% endif %}
     </td>
-    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
+    <td class="px-3 py-2.5 whitespace-nowrap text-xs tabular-nums w-16">
       {% if server.associatedPrompts %}
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300">{{ server.associatedPrompts | length }} prompt{{ 's' if server.associatedPrompts | length != 1 else '' }}</span>
+      <span class="font-medium text-purple-700 dark:text-purple-300" title="{{ server.associatedPrompts | length }} prompts">{{ server.associatedPrompts | length }}</span>
       {% else %}
-      <span class="text-gray-500 dark:text-gray-400 text-xs">0 prompts</span>
+      <span class="text-gray-300 dark:text-gray-600">0</span>
       {% endif %}
     </td>
-    <td class="px-6 py-4 whitespace-nowrap">
+    <td class="px-3 py-2.5 whitespace-nowrap">
       {% if server.tags %}
-        {% for tag in server.tags %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-1 mb-1" data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}">
+        {% for tag in server.tags[:2] %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 mr-1 mb-1" data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}">
           {% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}
         </span>
         {% endfor %}
+        {% if server.tags | length > 2 %}
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300 mb-1" title="{% for t in server.tags[2:] %}{% if t is mapping %}{{ t.id }}{% else %}{{ t }}{% endif %} {% endfor %}">+{{ server.tags | length - 2 }}</span>
+        {% endif %}
       {% else %}
-      <span class="text-gray-500 dark:text-gray-300 text-xs">None</span>
+      <span class="text-gray-400 dark:text-gray-500 text-xs">—</span>
       {% endif %}
     </td>
-    <td class="px-6 py-4 whitespace-nowrap">
-      {% if server.ownerEmail %}
-      <span class="text-sm text-gray-900 dark:text-gray-100">{{ server.ownerEmail }}</span>
-      {% else %}
-      <span class="text-gray-500 dark:text-gray-300 text-xs">N/A</span>
-      {% endif %}
+    <td class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20" title="{{ server.ownerEmail }}">
+      {{ server.ownerEmail.split('@')[0] if server.ownerEmail else '—' }}
     </td>
-    <td class="px-2 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 w-20">
-      {% if server.team %}{{ server.team }}{% else %}<span class="text-gray-400 dark:text-gray-600 text-xs">None</span>{% endif %}
+    <td class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20">
+      {% if server.team %}<span class="truncate inline-block max-w-full" title="{{ server.team }}">{{ server.team }}</span>{% else %}<span class="text-gray-300 dark:text-gray-600 text-xs">—</span>{% endif %}
     </td>
-    <td class="px-6 py-4 whitespace-nowrap">
+    <td class="px-3 py-2.5 whitespace-nowrap w-20">
       {% if server.visibility == 'private' %}
-      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Private</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">🔒 Private</span>
       {% elif server.visibility == 'team' %}
-      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">Team</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">👥 Team</span>
       {% elif server.visibility == 'public' %}
-      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Public</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">🌍 Public</span>
       {% else %}
-      <span class="text-gray-500 dark:text-gray-300 text-xs">N/A</span>
+      <span class="text-gray-400 dark:text-gray-500 text-xs">—</span>
       {% endif %}
     </td>
   </tr>

@@ -2,16 +2,16 @@
 <table id="prompts-table" class="min-w-full divide-y divide-gray-200">
   <thead class="bg-gray-50 dark:bg-gray-700">
     <tr>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-12">S. No.</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-36">Gateway Name</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
-      <th id="prompt-id-header" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-48">Prompt ID</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Description</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Tags</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Owner</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Team</th>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-20">Status</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-48">Actions</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-12">S. No.</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-28">Gateway Name</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-32">Name</th>
+      <th id="prompt-id-header" class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Prompt ID</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider">Description</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Tags</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Owner</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-20">Team</th>
+      <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 dark:text-gray-400 uppercase tracking-wider w-24">Status</th>
     </tr>
   </thead>
   <tbody id="prompts-table-body" class="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-700">
@@ -20,8 +20,8 @@
       {% set prompt_gateway = prompt.gatewaySlug or 'Local' %}
       {% set prompt_tech_name = prompt.name or prompt.originalName or prompt.id %}
       {% set can_modify = is_admin or prompt.owner_email == current_user_email or prompt.ownerEmail == current_user_email or (prompt.visibility == 'team' and prompt.teamId and user_team_roles.get(prompt.teamId|string) == 'owner') or (prompt.visibility == 'team' and prompt.team_id and user_team_roles.get(prompt.team_id|string) == 'owner') %}
-      <tr data-enabled="{{ prompt.enabled|lower }}" data-owner-email="{{ prompt.ownerEmail or prompt.owner_email }}" data-team-id="{{ prompt.teamId or prompt.team_id or '' }}" data-visibility="{{ prompt.visibility }}">
-        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+      <tr class="transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40" data-enabled="{{ prompt.enabled|lower }}" data-owner-email="{{ prompt.ownerEmail or prompt.owner_email }}" data-team-id="{{ prompt.teamId or prompt.team_id or '' }}" data-visibility="{{ prompt.visibility }}">
+        <td class="px-2 py-2.5 whitespace-nowrap text-sm font-medium w-32 align-middle">
                 <div class="relative"
                      x-data="overflowMenu('prompts-table-wrapper')"
                @click.away="menuOpen = false"
@@ -104,23 +104,35 @@
             </div>
           </div>
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 w-12 dark:text-gray-100">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
-        <td class="px-6 py-4 whitespace-normal break-words text-sm text-gray-500 dark:text-gray-300 w-36">{{ prompt_gateway }}</td>
-        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
-          <div>{{ prompt_label }}</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400 font-mono">{{ prompt_tech_name }}</div>
-          {% if prompt.title %}
-          <div class="text-xs text-gray-500 dark:text-gray-400 italic">{{ prompt.title }}</div>
-          {% endif %}
+        <td class="px-3 py-2.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500 tabular-nums w-12">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
+        <td class="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 w-28">
+          <div class="truncate" title="{{ prompt_gateway }}">{{ prompt_gateway }}</div>
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 w-48" aria-labelledby="prompt-id-header">
-          <div class="font-mono text-xs">{{ prompt.id }}</div>
+        <td class="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100 w-32">
+          <div class="truncate" title="{{ prompt_label }}">{{ prompt_label }}</div>
+          <div class="text-[11px] text-gray-400 dark:text-gray-500 font-mono truncate">{{ prompt_tech_name }}</div>
         </td>
-        <td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-300 align-top">{% set clean_desc = (prompt.description or "") | decode_html | replace('\n', ' ') | replace('\r', ' ') %} {% set refactor_desc = clean_desc | striptags | trim %}<div title="{{ refactor_desc }}" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-width:36rem;word-break:break-all;">{{ refactor_desc[:400] }}{% if refactor_desc | length is greaterthan 400 %}…{% endif %}</div></td>
-        <td class="px-6 py-4 whitespace-nowrap">{% if prompt.tags %} {% for tag in prompt.tags %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-1 mb-1" data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}">{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}</span>{% endfor %} {% else %}<span class="text-gray-500 dark:text-gray-300 text-xs">None</span>{% endif %}</td>
-        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 w-20">{{ prompt.ownerEmail or prompt.owner_email }}</td>
-        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 w-20">{% if prompt.team %}{{ prompt.team }}{% else %}<span class="text-gray-400 dark:text-gray-600 text-xs">None</span>{% endif %}</td>
-        <td class="px-6 py-4 whitespace-nowrap text-sm w-20">
+        <td class="px-3 py-2.5 w-20" aria-labelledby="prompt-id-header">
+          <span class="inline-block font-mono text-[11px] text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700/70 rounded px-1.5 py-0.5" title="{{ prompt.id }}">{{ prompt.id[:8] }}</span>
+        </td>
+        <td class="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 max-w-md">
+          {% set clean_desc = (prompt.description or "") | decode_html | replace('\n', ' ') | replace('\r', ' ') %} {% set refactor_desc = clean_desc | striptags | trim %}
+          <p class="truncate" title="{{ refactor_desc }}">{{ refactor_desc[:300] }}{% if refactor_desc | length is greaterthan 300 %}…{% endif %}</p>
+        </td>
+        <td class="px-3 py-2.5 whitespace-nowrap">
+          {% if prompt.tags %} {% for tag in prompt.tags[:2] %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 mr-1 mb-1" data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}">{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}</span>
+          {% endfor %} {% if prompt.tags | length > 2 %}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300 mb-1" title="{% for t in prompt.tags[2:] %}{% if t is mapping %}{{ t.id }}{% else %}{{ t }}{% endif %} {% endfor %}">+{{ prompt.tags | length - 2 }}</span>
+          {% endif %} {% else %} <span class="text-gray-400 dark:text-gray-500 text-xs">—</span> {% endif %}
+        </td>
+        <td class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20" title="{{ prompt.ownerEmail or prompt.owner_email }}">
+          {{ (prompt.ownerEmail or prompt.owner_email or '').split('@')[0] if (prompt.ownerEmail or prompt.owner_email) else '—' }}
+        </td>
+        <td class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20">
+          {% if prompt.team %}<span class="truncate inline-block max-w-full" title="{{ prompt.team }}">{{ prompt.team }}</span>{% else %}<span class="text-gray-300 dark:text-gray-600 text-xs">—</span>{% endif %}
+        </td>
+        <td class="px-3 py-2.5 whitespace-nowrap text-sm w-24">
           <div class="flex flex-col gap-1">
             <!-- Visibility badge -->
             {% if prompt.visibility == 'public' %}
