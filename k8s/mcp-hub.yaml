@@ -1,0 +1,165 @@
+# mcp-context-forge (mcp-hub) K8s 部署清单
+# 镜像：阿里云 ACR registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub
+# PostgreSQL / Redis 连接全部走 Secret 注入，部署前必须配置（详见 K8s部署指南.md）
+#
+# 用法：
+#   1. 先创建 ACR 拉取密钥（见指南 §2.2）
+#   2. 修改下方 mcp-hub-secrets 中的四个必填值
+#   3. kubectl apply -f k8s/mcp-hub.yaml
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-hub
+  labels:
+    app.kubernetes.io/name: mcp-hub
+
+---
+# 应用密钥：四个必填项，部署前必须替换
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-hub-secrets
+  namespace: mcp-hub
+type: Opaque
+stringData:
+  # PostgreSQL 连接串（云 RDS 或自建）
+  DATABASE_URL: "postgresql+psycopg://用户名:密码@rm-xxxxxx.pg.rds.aliyuncs.com:5432/mcp"
+  # Redis 连接串：默认账号无用户名（注意 : 后直接跟密码）；密码必须 URL 编码
+  #   @→%40  :→%3A  #→%23  /→%2F  %→%25
+  REDIS_URL: "redis://:密码@r-xxxxxx.redis.rds.aliyuncs.com:6379/0"
+  # JWT 签名密钥（≥32 字符）：openssl rand -base64 48
+  JWT_SECRET_KEY: "CHANGE_ME"
+  # 认证加密密钥（≥32 字符）：openssl rand -base64 32
+  AUTH_ENCRYPTION_SECRET: "CHANGE_ME"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-hub-gateway
+  namespace: mcp-hub
+  labels:
+    app.kubernetes.io/name: mcp-hub
+    app.kubernetes.io/component: gateway
+spec:
+  # 首次部署保持 1 副本（启动时自动执行数据库迁移），就绪后再扩容
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-hub
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-hub
+        app.kubernetes.io/component: gateway
+    spec:
+      imagePullSecrets:
+        - name: aliyun-acr
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: gateway
+          image: registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub:v1.0.8-ccfed1f
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4444
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: mcp-hub-secrets
+          env:
+            # Gunicorn worker 数：不设则按 min(2×CPU核数+1, 16) 自动扩，
+            # 每个 worker 约 250-350MB——8 核节点会被拉到 16 个 worker、内存 4GB+。
+            # 内部管理后台 4 个 worker 足够（异步 IO），稳定内存约 1.2GB
+            - name: GUNICORN_WORKERS
+              value: "4"
+            # 实体名称允许中文字符（默认模式仅 ASCII，中文名保存报 422）
+            - name: VALIDATION_NAME_PATTERN
+              value: "^[\w.\- ]+$"
+            # 容器内必须监听 0.0.0.0，否则 Service 探针不通
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "4444"
+            - name: MCPGATEWAY_UI_ENABLED
+              value: "true"
+            - name: MCPGATEWAY_ADMIN_API_ENABLED
+              value: "true"
+            - name: CACHE_TYPE
+              value: "redis"
+            - name: REDIS_PARSER
+              value: "hiredis"
+            - name: LOG_LEVEL
+              value: "ERROR"
+            # 会话时长（默认令牌仅 20 分钟；内网建议放宽，如 120/240/0）
+            - name: TOKEN_EXPIRY
+              value: "120"
+            - name: TOKEN_IDLE_TIMEOUT
+              value: "240"
+            - name: SESSION_MAX_LIFETIME
+              value: "0"
+            # 纯 HTTP（无 TLS）对外暴露时改为 "false"，否则浏览器拒收 cookie，
+            # 登录报 "CSRF token cookie missing"；HTTPS 部署保持 "true"
+            - name: CSRF_COOKIE_SECURE
+              value: "true"
+            - name: SECURE_COOKIES
+              value: "true"
+          # 首次启动要跑 alembic 迁移，startupProbe 给足时间（24×10s=240s）
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-hub-gateway
+  namespace: mcp-hub
+  labels:
+    app.kubernetes.io/name: mcp-hub
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mcp-hub
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: 4444
+      targetPort: http

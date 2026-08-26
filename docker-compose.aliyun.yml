@@ -1,0 +1,70 @@
+# 阿里云部署：仅运行网关容器，PostgreSQL / Redis 连接全部由环境变量注入。
+# 数据库与 Redis 使用外部实例（云 RDS/云 Redis 或服务器自建），不随 compose 启动。
+#
+# 用法：
+#   cp .env.aliyun.example .env.aliyun   # 填写 DATABASE_URL / REDIS_URL / 密钥
+#   docker compose -f docker-compose.aliyun.yml --env-file .env.aliyun up -d
+#
+# 镜像来源：registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub（构建后推送，见部署文档）
+services:
+  gateway:
+    image: registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub:${IMAGE_TAG:-v1.0.8-ccfed1f}
+    container_name: mcp-hub-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-4444}:4444"
+    environment:
+      # ═══════════ 必填：部署时配置 ═══════════
+      # PostgreSQL 连接串，例如：postgresql+psycopg://user:pass@rm-xxx.pg.rds.aliyuncs.com:5432/mcp
+      - DATABASE_URL=${DATABASE_URL:?需要在环境变量或 --env-file 中配置 DATABASE_URL（PostgreSQL 连接串）}
+      # Redis 连接串。⚠️ 默认账号无用户名：redis://:密码@host:6379/0；密码必须 URL 编码
+      # （@→%40 :→%3A #→%23 /→%2F %→%25），详见 .env.aliyun.example 中的格式说明
+      - REDIS_URL=${REDIS_URL:?需要在环境变量或 --env-file 中配置 REDIS_URL（Redis 连接串）}
+      # 网关启动强制要求的两个密钥（make init-secrets 可生成）
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?需要配置 JWT 签名密钥}
+      - AUTH_ENCRYPTION_SECRET=${AUTH_ENCRYPTION_SECRET:?需要配置认证加密密钥}
+
+      # ═══════════ 可选：以下均有默认值 ═══════════
+      # 容器内必须监听 0.0.0.0，否则端口映射不通
+      - HOST=0.0.0.0
+      - PORT=4444
+      # 首次启动种子管理员（仅数据库为空时生效），之后可改
+      - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-admin@example.com}
+      - PLATFORM_ADMIN_PASSWORD=${PLATFORM_ADMIN_PASSWORD:-}
+      - BASIC_AUTH_USER=${BASIC_AUTH_USER:-admin}
+      - BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD:-}
+      # Admin UI 与管理 API
+      - MCPGATEWAY_UI_ENABLED=${MCPGATEWAY_UI_ENABLED:-true}
+      - MCPGATEWAY_ADMIN_API_ENABLED=${MCPGATEWAY_ADMIN_API_ENABLED:-true}
+      # 缓存走 Redis（与 REDIS_URL 一致）
+      - CACHE_TYPE=redis
+      - REDIS_PARSER=hiredis
+      # 网关启动时自行执行 alembic 迁移（外部数据库场景）
+      - MCPGATEWAY_SKIP_MIGRATIONS=false
+      # ⚠️ 纯 HTTP 部署（无 TLS）必须关掉两个 Secure 标记，否则浏览器拒收 cookie，
+      # 登录报 "CSRF token cookie missing"（localhost 除外，浏览器对 127.0.0.1 有豁免）。
+      # 走 HTTPS 时保持默认（true）不要改。同时 ENVIRONMENT 不能设为 production。
+      - CSRF_COOKIE_SECURE=${CSRF_COOKIE_SECURE:-true}
+      - SECURE_COOKIES=${SECURE_COOKIES:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-ERROR}
+      # 会话时长（默认令牌仅 20 分钟；内网工具建议放宽，见 .env.aliyun.example 说明）
+      - TOKEN_EXPIRY=${TOKEN_EXPIRY:-20}
+      - TOKEN_IDLE_TIMEOUT=${TOKEN_IDLE_TIMEOUT:-60}
+      - SESSION_MAX_LIFETIME=${SESSION_MAX_LIFETIME:-480}
+      # Gunicorn worker 数。不设置时按 min(2×CPU核数+1, 16) 自动计算，
+      # 每个 worker 约 250-350MB 内存——4 核机器≈9 个 worker≈2.5-3GB。
+      # 内部管理后台负载很低，2-4 个 worker 足够（异步 IO，单 worker 也能扛高并发），内存可降到 1GB 以内。
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
+      # 实体名称允许中文字符（默认模式仅 ASCII，中文名保存会报 422）
+      - VALIDATION_NAME_PATTERN=${VALIDATION_NAME_PATTERN:-^[\w.\- ]+$}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request, json; d = json.loads(urllib.request.urlopen('http://localhost:4444/health', timeout=5).read()); exit(0 if d.get('status') == 'healthy' else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
