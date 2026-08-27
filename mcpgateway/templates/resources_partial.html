@@ -123,7 +123,7 @@
           {% set clean_desc = (resource.description or '') | decode_html | replace('\n', ' ') | replace('\r', ' ') %} {% set refactor_desc = clean_desc | striptags | trim %}
           <p class="truncate" title="{{ refactor_desc }}">{{ refactor_desc[:300] }}{% if refactor_desc | length is greaterthan 300 %}…{% endif %}</p>
         </td>
-        <td class="px-3 py-2.5 whitespace-nowrap">
+        <td class="px-3 py-2.5">
           {% if resource.tags %}{% for tag in resource.tags[:2] %}<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 mr-1 mb-1" data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}">{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}</span>{% endfor %}{% if resource.tags | length > 2 %}<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300 mb-1" title="{% for t in resource.tags[2:] %}{% if t is mapping %}{{ t.id }}{% else %}{{ t }}{% endif %} {% endfor %}">+{{ resource.tags | length - 2 }}</span>{% endif %}{% else %}<span class="text-gray-400 dark:text-gray-500 text-xs">—</span>{% endif %}
         </td>
         <td class="px-3 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 w-20" title="{{ resource.ownerEmail }}">

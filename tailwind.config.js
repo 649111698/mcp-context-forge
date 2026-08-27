@@ -10,23 +10,21 @@
  * to this single config file.
  *
  * Mapping rules:
- *   indigo       -> antd blue      (#1677ff = colorPrimary; main interactive color)
- *   blue         -> antd geekblue  (secondary blue, keeps badge contrast vs primary)
+ *   indigo, blue -> antd blue      (#1677ff = colorPrimary; main interactive color)
  *   gray, slate  -> antd neutral   (works for both light and `dark:` variants)
  *   red          -> antd red       (#ff4d4f = colorError)
  *   green, emerald, teal -> antd green / cyan
  *   yellow, amber, orange -> antd gold / orange
  *   purple       -> antd purple; pink -> antd magenta; rose -> antd volcano
  *
- * Tailwind's default radius scale already matches antd
- * (rounded = 4px = borderRadiusSM, rounded-md = 6px = borderRadius,
- * rounded-lg = 8px = card radius), so no radius overrides are needed.
+ * Radius mirrors antd: rounded = 4px = borderRadiusSM, rounded-md = 6px =
+ * borderRadius (controls), rounded-lg = 8px = card radius.
  */
 
 // antd neutral (gray) palette, steps 50-950
 const antdNeutral = {
     50: "#fafafa",
-    100: "#f5f5f7",
+    100: "#f5f5f5",
     200: "#f0f0f0",
     300: "#d9d9d9",
     400: "#bfbfbf",
@@ -36,6 +34,24 @@ const antdNeutral = {
     800: "#262626",
     900: "#141414",
     950: "#000000",
+};
+
+// antd blue palette — Chinese enterprise admin standard (colorPrimary #1677ff).
+// 600 and 500 both resolve to the primary so bg-indigo-600 / text-indigo-500
+// stay on-brand; hover (700) is the antd lighter hover blue, active (800) the
+// darker antd pressed blue.
+const antdBlue = {
+    50: "#e6f4ff",
+    100: "#bae0ff",
+    200: "#91caff",
+    300: "#69b1ff",
+    400: "#4096ff",
+    500: "#1677ff",
+    600: "#1677ff",
+    700: "#4096ff",
+    800: "#0958d9",
+    900: "#003eb3",
+    950: "#002c8c",
 };
 
 module.exports = {
@@ -49,32 +65,8 @@ module.exports = {
             colors: {
                 gray: antdNeutral,
                 slate: antdNeutral,
-                indigo: {
-                    50: "#f0f7ff",
-                    100: "#dceaff",
-                    200: "#b3d4ff",
-                    300: "#85bdff",
-                    400: "#2997ff",
-                    500: "#0071e3",
-                    600: "#0071e3",
-                    700: "#0060c2",
-                    800: "#004e9e",
-                    900: "#003d7a",
-                    950: "#002850",
-                },
-                blue: {
-                    50: "#f0f5ff",
-                    100: "#d6e4ff",
-                    200: "#adc6ff",
-                    300: "#85a5ff",
-                    400: "#597ef7",
-                    500: "#2f54eb",
-                    600: "#2f54eb",
-                    700: "#1d39c4",
-                    800: "#10239e",
-                    900: "#061178",
-                    950: "#030852",
-                },
+                indigo: antdBlue,
+                blue: antdBlue,
                 red: {
                     50: "#fff1f0",
                     100: "#ffccc7",
@@ -238,9 +230,9 @@ module.exports = {
                 ],
             },
             borderRadius: {
-                DEFAULT: "8px",
-                md: "10px",
-                lg: "10px",
+                DEFAULT: "6px",
+                md: "6px",
+                lg: "8px",
             },
             boxShadow: {
                 DEFAULT: "0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02)",

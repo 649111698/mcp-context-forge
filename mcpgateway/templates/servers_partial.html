@@ -172,7 +172,7 @@
       <span class="text-gray-300 dark:text-gray-600">0</span>
       {% endif %}
     </td>
-    <td class="px-3 py-2.5 whitespace-nowrap hidden min-[1355px]:table-cell">
+    <td class="hidden min-[1355px]:table-cell px-3 py-2.5">
       {% if server.tags %}
         {% for tag in server.tags[:2] %}
         <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 mr-1 mb-1" data-tag="{% if tag is mapping %}{{ tag.id }}{% else %}{{ tag }}{% endif %}">

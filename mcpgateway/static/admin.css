@@ -39,10 +39,10 @@
     color: rgb(243 244 246);
 }
 
-/* Active sidebar link (mes-chat apple-blue pill) */
+/* Active sidebar link (antd light-menu selected pill) */
 .sidebar-link.active {
-    background-color: #e8f3ff;
-    color: #0071e3;
+    background-color: #e6f4ff;
+    color: #1677ff;
     font-weight: 600;
 }
 
@@ -1168,20 +1168,20 @@ input[class*="focus:border-indigo-500"]:not([type="checkbox"]):not([type="radio"
 select[class*="focus:border-indigo-500"],
 textarea[class*="focus:border-indigo-500"] {
     border-color: #d9d9d9 !important;
-    border-radius: 10px !important;
+    border-radius: 6px !important;
     box-shadow: none !important;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
 input[class*="focus:border-indigo-500"]:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="button"]):not([type="submit"]):hover,
 select[class*="focus:border-indigo-500"]:hover,
 textarea[class*="focus:border-indigo-500"]:hover {
-    border-color: #2997ff !important;
+    border-color: #4096ff !important;
 }
 input[class*="focus:border-indigo-500"]:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="button"]):not([type="submit"]):focus,
 select[class*="focus:border-indigo-500"]:focus,
 textarea[class*="focus:border-indigo-500"]:focus {
-    border-color: #0071e3 !important;
-    box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.1) !important;
+    border-color: #1677ff !important;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1) !important;
     outline: none !important;
 }
 input::placeholder,
@@ -1202,13 +1202,13 @@ button[class*="bg-indigo-600"] {
     transition: background-color 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s;
 }
 button[class*="bg-indigo-600"]:hover {
-    background-color: #2997ff !important;
+    background-color: #4096ff !important;
 }
 button[class*="bg-indigo-600"]:active {
-    background-color: #0060c2 !important;
+    background-color: #0958d9 !important;
 }
 button[class*="bg-indigo-600"]:focus-visible {
-    box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2) !important;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2) !important;
 }
 
 /* --- Default (outline) buttons: antd default-button hover --- */
@@ -1217,8 +1217,8 @@ button[class*="border-gray-300"]:not([class*="bg-indigo-600"]):not([class*="bg-r
     transition: border-color 0.2s, color 0.2s, background-color 0.2s;
 }
 button[class*="border-gray-300"]:not([class*="bg-indigo-600"]):not([class*="bg-red-600"]):not([class*="rounded-r-md"]):hover {
-    border-color: #2997ff !important;
-    color: #2997ff !important;
+    border-color: #4096ff !important;
+    color: #4096ff !important;
 }
 html:not(.dark) button[class*="border-gray-300"]:not([class*="bg-indigo-600"]):not([class*="bg-red-600"]):not([class*="rounded-r-md"]):hover {
     background-color: #ffffff !important;
@@ -1228,9 +1228,9 @@ html:not(.dark) button[class*="border-gray-300"]:not([class*="bg-indigo-600"]):n
        Compact antd-table rhythm without touching those templates. --- */
 table:has(thead th[class*="px-6 py-3"]) thead th[class*="px-6 py-3"] {
     padding: 10px 12px !important;
-    font-size: 11px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.05em !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    letter-spacing: normal !important;
     color: #8c8c8c !important;
 }
 table:has(thead th[class*="px-6 py-3"]) tbody td[class*="px-6 py-4"] {
@@ -1244,6 +1244,57 @@ html:not(.dark) table:has(thead th[class*="px-6 py-3"]) tbody tr:hover {
 }
 html.dark table:has(thead th[class*="px-6 py-3"]) tbody tr:hover {
     background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* ===== Chinese enterprise admin refinements =========================
+   Familiar zh-CN console conventions (antd/TDesign style):
+   - table headers: 12px normal-case gray text (no US-style uppercase)
+   - page titles: compact 18px semibold instead of 24px bold
+   - cards: hairline border + near-flat shadow on the #f5f5f5 canvas
+   - status tags: 4px radius light-fill chips */
+
+/* Table headers across all entity tables: drop uppercase + letterspacing */
+main thead th[class*="uppercase"] {
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    color: #8c8c8c !important;
+}
+
+/* Page titles: 24px bold -> 18px semibold */
+main .tab-panel h2[class*="text-2xl"] {
+    font-size: 18px !important;
+    font-weight: 600 !important;
+    letter-spacing: normal !important;
+}
+
+/* Panel description text one step smaller/denser */
+main .tab-panel h2[class*="text-2xl"] + p,
+main .tab-panel div > p[class*="text-sm text-gray-600"] {
+    font-size: 12px !important;
+}
+
+/* Cards: antd-style hairline border, near-flat shadow (light mode) */
+html:not(.dark) main div[class*="shadow rounded-lg"] {
+    border: 1px solid #f0f0f0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02) !important;
+}
+
+/* Status tags/badges: antd Tag 4px radius instead of pill */
+main span[class*="-100 "][class*="text-"][class*="rounded"] {
+    border-radius: 4px !important;
+}
+
+/* Tag chips in table cells: clip long tag names instead of overflowing
+   into the neighbouring fixed-width column */
+main td span[data-tag] {
+    display: inline-block;
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
 }
 
 /* --- Scrollbars: thin antd-style --- */
@@ -1314,22 +1365,22 @@ div[class*="px-4 pt-5 pb-4"][class*="sm:p-6"] {
 }
 
 
-/* ===== mes-chat visual identity ======================================
-   Apple-blue primary (#0071e3), 10px radius, light sidebar, #f5f5f7 canvas,
-   dark sidebar uses the antd dark container color like mes-chat. */
+/* ===== zh-CN enterprise theme =======================================
+   antd-blue primary (#1677ff), 6px control radius, light sidebar,
+   #f5f5f5 canvas; dark mode uses the antd dark container (#1f1f1f). */
 html.dark #sidebar {
-    background-color: #141414 !important;
+    background-color: #1f1f1f !important;
     border-color: rgba(255, 255, 255, 0.08) !important;
 }
 html.dark #sidebar .border-b {
     border-color: rgba(255, 255, 255, 0.08) !important;
 }
 
-/* Sidebar logo chip: mes-chat gradient square treatment */
+/* Sidebar logo chip: antd-blue gradient square treatment */
 #sidebar img[src*="contextforge-logo"],
 #sidebar img[src*="contextforge-icon"] {
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 3px;
-    background: linear-gradient(135deg, #0071e3 0%, #2997ff 100%);
-    box-shadow: 0 2px 8px rgba(0, 113, 227, 0.3);
+    background: linear-gradient(135deg, #1677ff 0%, #4096ff 100%);
+    box-shadow: 0 2px 8px rgba(22, 119, 255, 0.3);
 }
