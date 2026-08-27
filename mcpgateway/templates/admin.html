@@ -18,7 +18,7 @@
       href="{{ root_path }}/static/favicon.ico"
     />
     <!-- Tailwind CSS - Using precompiled CSS for strict CSP compliance -->
-    <link rel="stylesheet" href="{{ root_path }}/static/css/tailwind.min.css?v=5" />
+    <link rel="stylesheet" href="{{ root_path }}/static/css/tailwind.min.css?v=6" />
     <!-- Custom animations - Previously defined via inline Tailwind config, now external for CSP compliance -->
     <link rel="stylesheet" href="{{ root_path }}/static/css/auth-animations.css" />
     <!-- HTMX is now bundled in the main JS bundle -->
@@ -169,7 +169,7 @@
     {% for css_file in bundle_css %}
     <link rel="stylesheet" href="{{ root_path }}/static/{{ css_file }}" />
     {% endfor %}
-    <link href="{{ root_path }}/static/admin.css?v=5" rel="stylesheet" />
+    <link href="{{ root_path }}/static/admin.css?v=6" rel="stylesheet" />
     <link href="{{ root_path }}/static/gantt-chart.css" rel="stylesheet" />
     <link href="{{ root_path }}/static/flame-graph.css" rel="stylesheet" />
     <style>
