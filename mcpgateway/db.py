@@ -3681,6 +3681,14 @@ class ToolApiSource(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Remote mode: fetch tool JSON from this URL on sync (None = manual JSON mode)
+    source_url: Mapped[Optional[str]] = mapped_column(String(767), nullable=True)
+    # Simple auth for the fetch: "none" | "bearer" | "basic" | "header"
+    auth_type: Mapped[Optional[str]] = mapped_column(String(20), default="none", nullable=False)
+    auth_header_key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Encrypted at rest via services_auth.encode_auth; never rendered back to the UI
+    auth_credential: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Manual JSON, or the last-fetched snapshot for remote sources
     content: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
     owner_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

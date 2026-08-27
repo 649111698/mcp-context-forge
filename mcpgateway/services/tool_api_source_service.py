@@ -23,6 +23,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 # Third-Party
+import httpx
 import orjson
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -33,8 +34,12 @@ from mcpgateway.db import Tool as DbTool
 from mcpgateway.db import ToolApiSource
 from mcpgateway.schemas import ToolCreate, ToolUpdate
 from mcpgateway.services.tool_service import tool_service, ToolError
+from mcpgateway.utils.services_auth import decode_auth, encode_auth
 
 logger = logging.getLogger(__name__)
+
+FETCH_TIMEOUT_SECONDS = 15.0
+_VALID_AUTH_TYPES = frozenset({"none", "bearer", "basic", "header"})
 
 # Fields copied from stored JSON into ToolCreate/ToolUpdate. Ownership and
 # scope fields (team_id, owner_email, visibility, id) are deliberately absent:
@@ -86,7 +91,195 @@ class ToolApiSourceNotFoundError(Exception):
 
 
 class ToolApiSourceService:
-    """CRUD + sync service for saved MCP API tool definitions."""
+    """CRUD + sync service for saved MCP API tool definitions.
+
+    Two modes per source:
+    - remote (``source_url`` set): tool JSON is fetched from the URL on every
+      sync, using the stored simple auth (none / bearer / basic / header).
+      The last successful payload is kept in ``content`` as a snapshot.
+    - manual (``source_url`` empty): the stored ``content`` JSON is used.
+    """
+
+    def validate_source_url(self, source_url: Optional[str]) -> Optional[str]:
+        """Validate a remote source URL.
+
+        Args:
+            source_url: User-provided URL, or None/blank for manual mode.
+
+        Returns:
+            The normalized URL, or None when no URL was given.
+
+        Raises:
+            ToolApiSourceValidationError: If the URL is not http(s).
+
+        Examples:
+            >>> svc = ToolApiSourceService()
+            >>> svc.validate_source_url(None) is None
+            True
+            >>> svc.validate_source_url("  ") is None
+            True
+            >>> svc.validate_source_url("https://x.example/tools.json")
+            'https://x.example/tools.json'
+            >>> try:
+            ...     svc.validate_source_url("ftp://x/tools.json")
+            ... except ToolApiSourceValidationError as e:
+            ...     "http" in str(e)
+            True
+        """
+        if not source_url or not source_url.strip():
+            return None
+        url = source_url.strip()
+        if not url.lower().startswith(("http://", "https://")):
+            raise ToolApiSourceValidationError("Source URL must start with http:// or https://")
+        return url
+
+    def _encode_credential(self, auth_type: str, auth_header_key: Optional[str], credential: Optional[str]) -> Optional[str]:
+        """Encrypt a fetch credential for at-rest storage.
+
+        Args:
+            auth_type: One of none/bearer/basic/header.
+            auth_header_key: Custom header name (header mode).
+            credential: Secret value (token, "user:password", or header value).
+
+        Returns:
+            Encrypted auth blob, or None when nothing to store.
+
+        Examples:
+            >>> svc = ToolApiSourceService()
+            >>> svc._encode_credential("none", None, "ignored") is None
+            True
+            >>> blob = svc._encode_credential("bearer", None, "tok")
+            >>> blob and "tok" not in blob
+            True
+        """
+        if auth_type == "none" or not credential:
+            return None
+        return encode_auth({"credential": credential, "header_key": auth_header_key})
+
+    def _build_fetch_headers(self, source: ToolApiSource) -> Dict[str, str]:
+        """Build request headers with the stored auth for a remote fetch.
+
+        Args:
+            source: Source row with auth_type/auth_credential.
+
+        Returns:
+            Headers dict (possibly empty for auth_type none).
+
+        Examples:
+            >>> svc = ToolApiSourceService()
+            >>> class S:  # minimal fake row
+            ...     auth_type = "none"; auth_credential = None; auth_header_key = None
+            >>> svc._build_fetch_headers(S())
+            {}
+        """
+        if not source.auth_credential or source.auth_type in (None, "", "none"):
+            return {}
+        try:
+            data = decode_auth(source.auth_credential)
+            credential = data.get("credential", "")
+            header_key = data.get("header_key") or source.auth_header_key
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            raise ToolApiSourceValidationError(f"Failed to decrypt stored credential: {ex}") from ex
+
+        if source.auth_type == "bearer":
+            return {"Authorization": f"Bearer {credential}"}
+        if source.auth_type == "basic":
+            import base64  # pylint: disable=import-outside-toplevel
+
+            b64 = base64.b64encode(credential.encode("utf-8")).decode("ascii")
+            return {"Authorization": f"Basic {b64}"}
+        if source.auth_type == "header":
+            if not header_key:
+                raise ToolApiSourceValidationError("Custom header auth requires a header name")
+            return {header_key: credential}
+        return {}
+
+    async def fetch_content(self, source: ToolApiSource) -> str:
+        """Fetch tool JSON from a remote source URL using stored auth.
+
+        Args:
+            source: Source row with a source_url configured.
+
+        Returns:
+            The response body text.
+
+        Raises:
+            ToolApiSourceValidationError: On connection errors, non-2xx
+                responses or auth misconfiguration.
+
+        Examples:
+            >>> import asyncio
+            >>> svc = ToolApiSourceService()
+            >>> class S:
+            ...     source_url = None; auth_type = "none"
+            ...     auth_credential = None; auth_header_key = None
+            >>> try:
+            ...     asyncio.run(svc.fetch_content(S()))
+            ... except ToolApiSourceValidationError as e:
+            ...     "no source URL" in str(e)
+            True
+        """
+        if not source.source_url:
+            raise ToolApiSourceValidationError("Source has no source URL")
+        headers = self._build_fetch_headers(source)
+        return await self._fetch_url(source.source_url, headers)
+
+    async def fetch_url_content(self, source_url: str, auth_type: str = "none", auth_credential: Optional[str] = None, auth_header_key: Optional[str] = None) -> str:
+        """Fetch tool JSON from a URL with raw (unencrypted) credentials.
+
+        Used for save-time validation before anything is persisted.
+
+        Args:
+            source_url: URL to fetch.
+            auth_type: none/bearer/basic/header.
+            auth_credential: Raw secret value.
+            auth_header_key: Custom header name for header auth.
+
+        Returns:
+            The response body text.
+
+        Raises:
+            ToolApiSourceValidationError: On connection errors or non-2xx.
+        """
+        headers: Dict[str, str] = {}
+        if auth_type == "bearer" and auth_credential:
+            headers["Authorization"] = f"Bearer {auth_credential}"
+        elif auth_type == "basic" and auth_credential:
+            import base64  # pylint: disable=import-outside-toplevel
+
+            headers["Authorization"] = "Basic " + base64.b64encode(auth_credential.encode("utf-8")).decode("ascii")
+        elif auth_type == "header" and auth_credential:
+            if not auth_header_key:
+                raise ToolApiSourceValidationError("Custom header auth requires a header name")
+            headers[auth_header_key] = auth_credential
+        return await self._fetch_url(source_url, headers)
+
+    @staticmethod
+    async def _fetch_url(source_url: str, headers: Dict[str, str]) -> str:
+        """GET a URL expecting JSON, mapping failures to validation errors.
+
+        Args:
+            source_url: URL to fetch.
+            headers: Request headers (auth already applied).
+
+        Returns:
+            Response body text.
+
+        Raises:
+            ToolApiSourceValidationError: On transport errors or bad status.
+        """
+        headers = dict(headers)
+        headers.setdefault("Accept", "application/json")
+        try:
+            async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
+                response = await client.get(source_url, headers=headers)
+        except httpx.HTTPError as ex:
+            raise ToolApiSourceValidationError(f"Failed to fetch {source_url}: {ex}") from ex
+        if response.status_code in (401, 403):
+            raise ToolApiSourceValidationError(f"Fetch returned {response.status_code} — check the auth settings")
+        if response.status_code != 200:
+            raise ToolApiSourceValidationError(f"Fetch returned HTTP {response.status_code}")
+        return response.text
 
     def parse_content(self, content: str) -> List[Dict[str, Any]]:
         """Parse and validate stored tool JSON.
@@ -223,30 +416,54 @@ class ToolApiSourceService:
             raise ToolApiSourceNotFoundError(f"Tool API source not found: {source_id}")
         return source
 
-    def create_source(self, db: Session, display_name: Optional[str], description: Optional[str], content: str, enabled: bool, owner_email: Optional[str]) -> ToolApiSource:
+    def create_source(
+        self,
+        db: Session,
+        display_name: Optional[str],
+        description: Optional[str],
+        content: str,
+        enabled: bool,
+        owner_email: Optional[str] = None,
+        source_url: Optional[str] = None,
+        auth_type: str = "none",
+        auth_header_key: Optional[str] = None,
+        auth_credential: Optional[str] = None,
+    ) -> ToolApiSource:
         """Validate and save a new tool API source.
 
         Args:
             db: Database session.
             display_name: Optional label; derived from the JSON when blank.
             description: Optional free-text note.
-            content: Raw tool JSON text.
+            content: Raw tool JSON text (manual JSON, or a first snapshot).
             enabled: Whether ``sync_all`` includes this source.
             owner_email: Creator email.
+            source_url: Remote URL to fetch tool JSON from (None = manual).
+            auth_type: Fetch auth: none/bearer/basic/header.
+            auth_header_key: Custom header name for header auth.
+            auth_credential: Secret for the chosen auth type (stored encrypted).
 
         Returns:
             The created ToolApiSource row.
 
         Raises:
-            ToolApiSourceValidationError: If the tool JSON is invalid.
+            ToolApiSourceValidationError: If the URL or tool JSON is invalid.
         """
+        source_url = self.validate_source_url(source_url)
+        if auth_type not in _VALID_AUTH_TYPES:
+            raise ToolApiSourceValidationError(f"Invalid auth type: {auth_type}")
         self.parse_content(content)
+
         source = ToolApiSource(
             display_name=(display_name or "").strip() or self.derive_display_name(content),
             description=(description or "").strip() or None,
             content=content.strip(),
             enabled=enabled,
             owner_email=owner_email,
+            source_url=source_url,
+            auth_type=auth_type,
+            auth_header_key=(auth_header_key or "").strip() or None if auth_type == "header" else None,
+            auth_credential=self._encode_credential(auth_type, auth_header_key, auth_credential),
         )
         db.add(source)
         db.commit()
@@ -254,7 +471,20 @@ class ToolApiSourceService:
         logger.info("Created tool API source %s (%s)", source.id, source.display_name)
         return source
 
-    def update_source(self, db: Session, source_id: str, display_name: Optional[str], description: Optional[str], content: str, enabled: bool) -> ToolApiSource:
+    def update_source(
+        self,
+        db: Session,
+        source_id: str,
+        display_name: Optional[str],
+        description: Optional[str],
+        content: str,
+        enabled: bool,
+        source_url: Optional[str] = None,
+        auth_type: str = "none",
+        auth_header_key: Optional[str] = None,
+        auth_credential: Optional[str] = None,
+        credential_provided: bool = False,
+    ) -> ToolApiSource:
         """Update an existing tool API source.
 
         Args:
@@ -262,22 +492,36 @@ class ToolApiSourceService:
             source_id: Source id.
             display_name: Optional label; derived from the JSON when blank.
             description: Optional free-text note.
-            content: Raw tool JSON text.
+            content: Raw tool JSON text (manual JSON, or last snapshot).
             enabled: Whether ``sync_all`` includes this source.
+            source_url: Remote URL to fetch from (None/blank = manual mode).
+            auth_type: Fetch auth: none/bearer/basic/header.
+            auth_header_key: Custom header name for header auth.
+            auth_credential: New secret (only applied when provided).
+            credential_provided: Whether the form submitted a credential;
+                False keeps the previously stored secret.
 
         Returns:
             The updated ToolApiSource row.
 
         Raises:
             ToolApiSourceNotFoundError: If the source does not exist.
-            ToolApiSourceValidationError: If the tool JSON is invalid.
+            ToolApiSourceValidationError: If the URL or tool JSON is invalid.
         """
         source = self.get_source(db, source_id)
+        source_url = self.validate_source_url(source_url)
+        if auth_type not in _VALID_AUTH_TYPES:
+            raise ToolApiSourceValidationError(f"Invalid auth type: {auth_type}")
         self.parse_content(content)
         source.display_name = (display_name or "").strip() or self.derive_display_name(content)
         source.description = (description or "").strip() or None
         source.content = content.strip()
         source.enabled = enabled
+        source.source_url = source_url
+        source.auth_type = auth_type
+        source.auth_header_key = (auth_header_key or "").strip() or None if auth_type == "header" else None
+        if credential_provided:
+            source.auth_credential = self._encode_credential(auth_type, auth_header_key, auth_credential)
         db.commit()
         db.refresh(source)
         logger.info("Updated tool API source %s (%s)", source.id, source.display_name)
@@ -306,10 +550,12 @@ class ToolApiSourceService:
     async def sync_source(self, db: Session, source_id: str, user_email: Optional[str] = None) -> Dict[str, Any]:
         """Upsert tools from a saved source, matching existing tools by name.
 
-        For each tool definition in the stored JSON: a local (non-gateway)
-        tool with the same name is overwritten with the stored definition;
-        otherwise the tool is registered. Gateway-managed tools are skipped
-        because gateways own their tool definitions.
+        Remote sources (``source_url`` set) are re-fetched first; the fresh
+        payload replaces the stored snapshot and is applied. For each tool
+        definition: a local (non-gateway) tool with the same name is
+        overwritten with the definition; otherwise the tool is registered.
+        Gateway-managed tools are skipped because gateways own their tool
+        definitions.
 
         Args:
             db: Database session.
@@ -325,7 +571,22 @@ class ToolApiSourceService:
             ToolApiSourceValidationError: If the stored JSON no longer parses.
         """
         source = self.get_source(db, source_id)
-        items = self.parse_content(source.content)
+
+        if source.source_url:
+            try:
+                fetched = (await self.fetch_content(source)).strip()
+                items = self.parse_content(fetched)
+                source.content = fetched
+                db.commit()
+            except ToolApiSourceValidationError as ex:
+                summary = f"Fetch failed: {ex}"
+                source.last_synced_at = datetime.now(timezone.utc)
+                source.last_sync_result = summary
+                db.commit()
+                logger.warning("Tool API source '%s' fetch failed: %s", source.display_name, ex)
+                return {"created": 0, "updated": 0, "skipped": 0, "failed": 1, "errors": [summary], "summary": summary}
+        else:
+            items = self.parse_content(source.content)
 
         created, updated, skipped, failed = 0, 0, 0, 0
         errors: List[str] = []

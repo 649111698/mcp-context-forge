@@ -15284,6 +15284,9 @@ async def _render_tool_apis_partial(
                 "description": source.description,
                 "enabled": source.enabled,
                 "owner_email": source.owner_email,
+                "source_url": source.source_url,
+                "auth_type": source.auth_type or "none",
+                "has_credential": bool(source.auth_credential),
                 "last_synced_at": source.last_synced_at,
                 "last_sync_result": source.last_sync_result,
                 "summary": tool_api_source_service.summarize_content(source.content),
@@ -15295,12 +15298,30 @@ async def _render_tool_apis_partial(
     if form_mode and form_mode != "new":
         try:
             source = tool_api_source_service.get_source(db, form_mode)
-            form_source = {"id": source.id, "display_name": source.display_name, "description": source.description, "enabled": source.enabled, "content": source.content}
+            form_source = {
+                "id": source.id,
+                "display_name": source.display_name,
+                "description": source.description,
+                "enabled": source.enabled,
+                "content": source.content,
+                "source_url": source.source_url,
+                "auth_type": source.auth_type or "none",
+                "auth_header_key": source.auth_header_key,
+                "has_credential": bool(source.auth_credential),
+            }
         except ToolApiSourceNotFoundError:
             form_mode = None
 
     if form_source and form_values is None:
-        form_values = {"display_name": form_source["display_name"], "description": form_source["description"], "enabled": form_source["enabled"], "content": form_source["content"]}
+        form_values = {
+            "display_name": form_source["display_name"],
+            "description": form_source["description"],
+            "enabled": form_source["enabled"],
+            "content": form_source["content"],
+            "source_url": form_source["source_url"] or "",
+            "auth_type": form_source["auth_type"],
+            "auth_header_key": form_source["auth_header_key"] or "",
+        }
 
     return request.app.state.templates.TemplateResponse(
         request,
@@ -15351,10 +15372,17 @@ async def admin_tool_apis_save(
 ) -> HTMLResponse:
     """Create or update a saved tool API source from the admin form.
 
+    When ``source_url`` is provided (remote mode), the URL is fetched with
+    the given auth before saving; the fetched JSON becomes the content
+    snapshot and must validate. Manual mode keeps the pasted JSON.
+
     Args:
         request: FastAPI request containing the form fields:
             ``source_id`` (empty = create), ``display_name``, ``description``,
-            ``content`` (tool JSON), ``enabled`` checkbox.
+            ``source_url``, ``auth_type`` (none/bearer/basic/header),
+            ``auth_header_key``, ``auth_credential`` (password field),
+            ``content`` (manual tool JSON / snapshot), ``enabled`` checkbox,
+            ``action`` (``save`` or ``save_and_sync``).
         db: Database session.
         user: Authenticated user.
 
@@ -15367,28 +15395,81 @@ async def admin_tool_apis_save(
     source_id = str(form.get("source_id") or "").strip()
     display_name = str(form.get("display_name") or "").strip()
     description = str(form.get("description") or "").strip()
+    source_url = str(form.get("source_url") or "").strip()
+    auth_type = str(form.get("auth_type") or "none").strip() or "none"
+    auth_header_key = str(form.get("auth_header_key") or "").strip()
+    auth_credential_raw = form.get("auth_credential")
+    auth_credential = auth_credential_raw if isinstance(auth_credential_raw, str) else ""
+    credential_provided = isinstance(auth_credential_raw, str) and auth_credential_raw != ""
     content = str(form.get("content") or "").strip()
     enabled = form.get("enabled") is not None
+    save_and_sync = str(form.get("action") or "save") == "save_and_sync"
+
+    form_values = {
+        "display_name": display_name,
+        "description": description,
+        "enabled": enabled,
+        "content": content,
+        "source_url": source_url,
+        "auth_type": auth_type,
+        "auth_header_key": auth_header_key,
+    }
+
+    async def error_page(message: str) -> HTMLResponse:
+        return await _render_tool_apis_partial(request, db, form_mode=source_id or "new", form_values=form_values, message=message, message_is_error=True)
 
     try:
+        # Remote mode: validate the URL + auth by fetching now; the fetched
+        # payload is stored as the content snapshot.
+        if source_url:
+            try:
+                fetched = (await tool_api_source_service.fetch_url_content(source_url, auth_type=auth_type, auth_credential=auth_credential or None, auth_header_key=auth_header_key or None)).strip()
+                tool_api_source_service.parse_content(fetched)
+                content = fetched
+                form_values["content"] = fetched
+            except ToolApiSourceValidationError as ex:
+                return await error_page(str(ex))
+
         if source_id:
-            tool_api_source_service.update_source(db, source_id, display_name=display_name, description=description, content=content, enabled=enabled)
+            tool_api_source_service.update_source(
+                db,
+                source_id,
+                display_name=display_name,
+                description=description,
+                content=content,
+                enabled=enabled,
+                source_url=source_url,
+                auth_type=auth_type,
+                auth_header_key=auth_header_key,
+                auth_credential=auth_credential,
+                credential_provided=credential_provided,
+            )
+            saved_id = source_id
             message = f"Saved API '{display_name or source_id}'"
         else:
-            source = tool_api_source_service.create_source(db, display_name=display_name, description=description, content=content, enabled=enabled, owner_email=user_email)
+            source = tool_api_source_service.create_source(
+                db,
+                display_name=display_name,
+                description=description,
+                content=content,
+                enabled=enabled,
+                owner_email=user_email,
+                source_url=source_url,
+                auth_type=auth_type,
+                auth_header_key=auth_header_key,
+                auth_credential=auth_credential,
+            )
+            saved_id = source.id
             message = f"Saved API '{source.display_name}'"
+
+        if save_and_sync:
+            result = await tool_api_source_service.sync_source(db, saved_id, user_email=user_email)
+            return await _render_tool_apis_partial(request, db, message=f"{message} — {result['summary']}", message_is_error=result["failed"] > 0, refresh_tools_table=True)
         return await _render_tool_apis_partial(request, db, message=message)
     except ToolApiSourceNotFoundError:
         return await _render_tool_apis_partial(request, db, message="Tool API source not found", message_is_error=True)
     except ToolApiSourceValidationError as ex:
-        return await _render_tool_apis_partial(
-            request,
-            db,
-            form_mode=source_id or "new",
-            form_values={"display_name": display_name, "description": description, "enabled": enabled, "content": content},
-            message=str(ex),
-            message_is_error=True,
-        )
+        return await error_page(str(ex))
 
 
 @admin_router.post("/tool-apis/sync-all")

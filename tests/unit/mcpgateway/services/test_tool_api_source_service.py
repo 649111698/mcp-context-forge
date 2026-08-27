@@ -133,15 +133,16 @@ def test_delete_source(service, mock_db):
 # ---------------------------------------------------------------------------
 
 
-def wire_db(mock_db, existing_tool=None):
+def wire_db(mock_db, existing_tool=None, source=None):
     """Wire a mock session so get_source resolves and tool lookup returns a fixture.
 
     Args:
         mock_db: Mock session to configure.
         existing_tool: Tool row returned by the name lookup (None = not found).
+        source: Source row returned by get_source (default: fresh make_source).
     """
     scalars = mock_db.execute.return_value.scalars.return_value
-    scalars.one_or_none.return_value = make_source()
+    scalars.one_or_none.return_value = source or make_source()
     scalars.first.return_value = existing_tool
 
 
@@ -216,3 +217,141 @@ async def test_sync_all_skips_disabled_sources(service, mock_db):
         result = await service.sync_all(mock_db, "admin@example.com")
     tool_svc.register_tool.assert_not_called()
     assert "0 created" in result["summary"]
+
+
+# ---------------------------------------------------------------------------
+# remote URL mode
+# ---------------------------------------------------------------------------
+
+
+def test_validate_source_url(service):
+    """Only http(s) URLs are accepted; blank means manual mode."""
+    assert service.validate_source_url(None) is None
+    assert service.validate_source_url("  ") is None
+    assert service.validate_source_url(" https://x.example/t.json ") == "https://x.example/t.json"
+    with pytest.raises(ToolApiSourceValidationError):
+        service.validate_source_url("ftp://x/t.json")
+    with pytest.raises(ToolApiSourceValidationError):
+        service.validate_source_url("file:///etc/passwd")
+
+
+def test_credential_encrypted_at_rest(service):
+    """Stored credential blob is ciphertext, decryptable for fetch headers."""
+    blob = service._encode_credential("bearer", None, "secret-token")
+    assert blob and "secret-token" not in blob
+    source = make_source()
+    source.auth_type = "bearer"
+    source.auth_credential = blob
+    assert service._build_fetch_headers(source) == {"Authorization": "Bearer secret-token"}
+
+
+def test_credential_basic_and_header(service):
+    """Basic auth is base64-encoded; header auth uses the stored key."""
+    source = make_source()
+    source.auth_type = "basic"
+    source.auth_credential = service._encode_credential("basic", None, "user:pass")
+    headers = service._build_fetch_headers(source)
+    assert headers["Authorization"].startswith("Basic ")
+
+    source.auth_type = "header"
+    source.auth_header_key = "X-Api-Key"
+    source.auth_credential = service._encode_credential("header", "X-Api-Key", "k1")
+    assert service._build_fetch_headers(source) == {"X-Api-Key": "k1"}
+
+
+def test_credential_none_mode(service):
+    """None auth never stores or decrypts anything."""
+    assert service._encode_credential("none", None, "x") is None
+    assert service._build_fetch_headers(make_source()) == {}
+
+
+@pytest.mark.asyncio
+async def test_fetch_content_requires_url(service):
+    """Fetching a manual-mode source is a validation error."""
+    with pytest.raises(ToolApiSourceValidationError, match="no source URL"):
+        await service.fetch_content(make_source())
+
+
+@pytest.mark.asyncio
+async def test_sync_source_fetches_remote(service, mock_db):
+    """Remote sources are re-fetched on sync and the snapshot updated."""
+    remote = make_source(content='{"name": "old", "url": "http://old"}')
+    remote.source_url = "https://cfg.example/tools.json"
+    remote.auth_type = "bearer"
+    remote.auth_credential = service._encode_credential("bearer", None, "tok")
+    wire_db(mock_db, existing_tool=None, source=remote)
+
+    class FakeResponse:
+        status_code = 200
+        text = '[{"name": "remoteTool", "url": "http://x/new"}]'
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, headers=None):
+            assert url == "https://cfg.example/tools.json"
+            assert headers.get("Authorization") == "Bearer tok"
+            return FakeResponse()
+
+    with patch("mcpgateway.services.tool_api_source_service.httpx.AsyncClient", FakeClient), patch("mcpgateway.services.tool_api_source_service.tool_service", async_tool_service()) as tool_svc:
+        result = await service.sync_source(mock_db, "src1")
+    assert result["created"] == 1
+    created: ToolCreate = tool_svc.register_tool.call_args[0][1]
+    assert created.name == "remoteTool"
+    assert '"remoteTool"' in remote.content
+
+
+@pytest.mark.asyncio
+async def test_sync_source_fetch_failure_reported(service, mock_db):
+    """A failing fetch marks the sync failed without touching tools."""
+    remote = make_source()
+    remote.source_url = "https://cfg.example/tools.json"
+    wire_db(mock_db, existing_tool=None, source=remote)
+
+    class FakeResponse:
+        status_code = 401
+        text = ""
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, headers=None):
+            return FakeResponse()
+
+    with patch("mcpgateway.services.tool_api_source_service.httpx.AsyncClient", FakeClient), patch("mcpgateway.services.tool_api_source_service.tool_service", async_tool_service()) as tool_svc:
+        result = await service.sync_source(mock_db, "src1")
+    assert result["failed"] == 1
+    assert "401" in result["summary"]
+    tool_svc.register_tool.assert_not_called()
+
+
+def test_create_source_with_url_roundtrip(service, mock_db):
+    """URL mode persists URL/auth and validates the snapshot JSON."""
+    source = service.create_source(
+        mock_db,
+        "cfg",
+        None,
+        '[{"name": "a", "url": "http://x"}]',
+        True,
+        "u@x",
+        source_url="https://cfg.example/tools.json",
+        auth_type="bearer",
+        auth_credential="tok",
+    )
+    assert source.source_url == "https://cfg.example/tools.json"
+    assert source.auth_type == "bearer"
+    assert source.auth_credential and "tok" not in source.auth_credential
