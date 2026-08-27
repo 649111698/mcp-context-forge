@@ -355,3 +355,105 @@ def test_create_source_with_url_roundtrip(service, mock_db):
     assert source.source_url == "https://cfg.example/tools.json"
     assert source.auth_type == "bearer"
     assert source.auth_credential and "tok" not in source.auth_credential
+
+
+# ---------------------------------------------------------------------------
+# POST fetch + upstream error envelopes
+# ---------------------------------------------------------------------------
+
+
+def test_parse_request_body_validation(service):
+    """POST bodies must be JSON objects; GET ignores the body."""
+    assert service._parse_request_body("GET", '{"a": 1}') is None
+    assert service._parse_request_body("POST", "") is None
+    assert service._parse_request_body("POST", '{"a": 1}') == {"a": 1}
+    with pytest.raises(ToolApiSourceValidationError, match="valid JSON"):
+        service._parse_request_body("POST", "{oops")
+    with pytest.raises(ToolApiSourceValidationError, match="JSON object"):
+        service._parse_request_body("POST", "[1]")
+    with pytest.raises(ToolApiSourceValidationError, match="Invalid fetch method"):
+        service._parse_request_body("DELETE", None)
+
+
+def test_check_error_envelope(service):
+    """HTTP-200 error envelopes surface the upstream message."""
+    service._check_error_envelope('[{"name": "t"}]')  # tool array passes
+    service._check_error_envelope('{"success": true}')  # success passes
+    service._check_error_envelope("not json")  # unparseable left to later validation
+    with pytest.raises(ToolApiSourceValidationError, match="未经授权"):
+        service._check_error_envelope('{"success": false, "errorCode": "401", "message": "未经授权的访问"}')
+    with pytest.raises(ToolApiSourceValidationError, match="no access"):
+        service._check_error_envelope('{"status": false, "errorCode": "403", "message": "no access"}')
+
+
+@pytest.mark.asyncio
+async def test_fetch_uses_post_and_body(service, mock_db):
+    """POST sources send the stored JSON body on every sync."""
+    remote = make_source()
+    remote.source_url = "https://cfg.example/export"
+    remote.fetch_method = "POST"
+    remote.request_body = '{"group": "ai"}'
+    remote.auth_type = "header"
+    remote.auth_header_key = "openApiSign"
+    remote.auth_credential = service._encode_credential("header", "openApiSign", "SIGN123")
+    wire_db(mock_db, existing_tool=None, source=remote)
+
+    seen = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = '[{"name": "posted", "url": "http://x"}]'
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            seen["url"], seen["headers"], seen["json"] = url, headers, json
+            return FakeResponse()
+
+    with patch("mcpgateway.services.tool_api_source_service.httpx.AsyncClient", FakeClient), patch("mcpgateway.services.tool_api_source_service.tool_service", async_tool_service()):
+        result = await service.sync_source(mock_db, "src1")
+    assert result["created"] == 1
+    assert seen["url"] == "https://cfg.example/export"
+    assert seen["headers"]["openApiSign"] == "SIGN123"
+    assert seen["json"] == {"group": "ai"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_surfaces_200_error_envelope(service, mock_db):
+    """Upstream 200-with-errorCode shows the API message, no tools touched."""
+    remote = make_source()
+    remote.source_url = "https://cfg.example/export"
+    remote.fetch_method = "POST"
+    remote.request_body = '{"group": "ai"}'
+    wire_db(mock_db, existing_tool=None, source=remote)
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"success": false, "errorCode": "403", "message": "该第三方应用没有此接口访问权限"}'
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            return FakeResponse()
+
+    with patch("mcpgateway.services.tool_api_source_service.httpx.AsyncClient", FakeClient), patch("mcpgateway.services.tool_api_source_service.tool_service", async_tool_service()) as tool_svc:
+        result = await service.sync_source(mock_db, "src1")
+    assert result["failed"] == 1
+    assert "该第三方应用没有此接口访问权限" in result["summary"]
+    tool_svc.register_tool.assert_not_called()

@@ -222,9 +222,13 @@ class ToolApiSourceService:
         if not source.source_url:
             raise ToolApiSourceValidationError("Source has no source URL")
         headers = self._build_fetch_headers(source)
-        return await self._fetch_url(source.source_url, headers)
+        method = (source.fetch_method or "GET").upper()
+        json_body = self._parse_request_body(method, source.request_body)
+        return await self._fetch_url(source.source_url, headers, method=method, json_body=json_body)
 
-    async def fetch_url_content(self, source_url: str, auth_type: str = "none", auth_credential: Optional[str] = None, auth_header_key: Optional[str] = None) -> str:
+    async def fetch_url_content(
+        self, source_url: str, auth_type: str = "none", auth_credential: Optional[str] = None, auth_header_key: Optional[str] = None, fetch_method: str = "GET", request_body: Optional[str] = None
+    ) -> str:
         """Fetch tool JSON from a URL with raw (unencrypted) credentials.
 
         Used for save-time validation before anything is persisted.
@@ -234,6 +238,8 @@ class ToolApiSourceService:
             auth_type: none/bearer/basic/header.
             auth_credential: Raw secret value.
             auth_header_key: Custom header name for header auth.
+            fetch_method: "GET" or "POST".
+            request_body: JSON body text for POST.
 
         Returns:
             The response body text.
@@ -252,15 +258,90 @@ class ToolApiSourceService:
             if not auth_header_key:
                 raise ToolApiSourceValidationError("Custom header auth requires a header name")
             headers[auth_header_key] = auth_credential
-        return await self._fetch_url(source_url, headers)
+        method = (fetch_method or "GET").upper()
+        json_body = self._parse_request_body(method, request_body)
+        return await self._fetch_url(source_url, headers, method=method, json_body=json_body)
 
     @staticmethod
-    async def _fetch_url(source_url: str, headers: Dict[str, str]) -> str:
-        """GET a URL expecting JSON, mapping failures to validation errors.
+    def _parse_request_body(method: str, request_body: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Validate the stored POST body for a remote fetch.
+
+        Args:
+            method: Fetch method (GET/POST).
+            request_body: Raw JSON body text (POST only).
+
+        Returns:
+            Parsed body dict, or None for GET / empty body.
+
+        Raises:
+            ToolApiSourceValidationError: If the method is invalid or the
+                body is not a JSON object.
+
+        Examples:
+            >>> ToolApiSourceService._parse_request_body("GET", '{"a": 1}') is None
+            True
+            >>> ToolApiSourceService._parse_request_body("POST", '{"a": 1}')
+            {'a': 1}
+            >>> try:
+            ...     ToolApiSourceService._parse_request_body("POST", '[1]')
+            ... except ToolApiSourceValidationError as e:
+            ...     "JSON object" in str(e)
+            True
+        """
+        if method not in ("GET", "POST"):
+            raise ToolApiSourceValidationError(f"Invalid fetch method: {method}")
+        if method == "GET" or not request_body or not request_body.strip():
+            return None
+        try:
+            body = orjson.loads(request_body)
+        except orjson.JSONDecodeError as ex:
+            raise ToolApiSourceValidationError(f"Request body is not valid JSON: {ex}") from ex
+        if not isinstance(body, dict):
+            raise ToolApiSourceValidationError("Request body must be a JSON object")
+        return body
+
+    @staticmethod
+    def _check_error_envelope(text: str) -> None:
+        """Detect APIs that report failures inside an HTTP-200 body.
+
+        Some APIs (e.g. Kingdee) answer 200 with ``{"success": false,
+        "errorCode": ..., "message": ...}``. Surface that message instead of
+        letting it fail later as unparseable tool JSON.
+
+        Args:
+            text: Response body text.
+
+        Raises:
+            ToolApiSourceValidationError: When the body is an error envelope.
+
+        Examples:
+            >>> ToolApiSourceService._check_error_envelope('[{"name": "t"}]')
+            >>> ToolApiSourceService._check_error_envelope('{"success": true}')
+            >>> try:
+            ...     ToolApiSourceService._check_error_envelope('{"success": false, "message": "no access"}')
+            ... except ToolApiSourceValidationError as e:
+            ...     str(e)
+            'no access'
+        """
+        try:
+            payload = orjson.loads(text)
+        except orjson.JSONDecodeError:
+            return
+        if not isinstance(payload, dict):
+            return
+        is_error = payload.get("success") is False or (payload.get("errorCode") and payload.get("status") is False)
+        if is_error:
+            raise ToolApiSourceValidationError(str(payload.get("message") or payload.get("error_desc") or f"Upstream error: {payload.get('errorCode')}"))
+
+    @staticmethod
+    async def _fetch_url(source_url: str, headers: Dict[str, str], method: str = "GET", json_body: Optional[Dict[str, Any]] = None) -> str:
+        """Fetch a URL expecting JSON, mapping failures to validation errors.
 
         Args:
             source_url: URL to fetch.
             headers: Request headers (auth already applied).
+            method: HTTP method, GET or POST.
+            json_body: Parsed JSON object for POST bodies.
 
         Returns:
             Response body text.
@@ -272,13 +353,17 @@ class ToolApiSourceService:
         headers.setdefault("Accept", "application/json")
         try:
             async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
-                response = await client.get(source_url, headers=headers)
+                if method == "POST":
+                    response = await client.post(source_url, headers=headers, json=json_body or {})
+                else:
+                    response = await client.get(source_url, headers=headers)
         except httpx.HTTPError as ex:
             raise ToolApiSourceValidationError(f"Failed to fetch {source_url}: {ex}") from ex
         if response.status_code in (401, 403):
             raise ToolApiSourceValidationError(f"Fetch returned {response.status_code} — check the auth settings")
         if response.status_code != 200:
             raise ToolApiSourceValidationError(f"Fetch returned HTTP {response.status_code}")
+        ToolApiSourceService._check_error_envelope(response.text)
         return response.text
 
     def parse_content(self, content: str) -> List[Dict[str, Any]]:
@@ -428,6 +513,8 @@ class ToolApiSourceService:
         auth_type: str = "none",
         auth_header_key: Optional[str] = None,
         auth_credential: Optional[str] = None,
+        fetch_method: str = "GET",
+        request_body: Optional[str] = None,
     ) -> ToolApiSource:
         """Validate and save a new tool API source.
 
@@ -442,6 +529,8 @@ class ToolApiSourceService:
             auth_type: Fetch auth: none/bearer/basic/header.
             auth_header_key: Custom header name for header auth.
             auth_credential: Secret for the chosen auth type (stored encrypted).
+            fetch_method: HTTP method for the remote fetch (GET/POST).
+            request_body: JSON object body for POST fetches.
 
         Returns:
             The created ToolApiSource row.
@@ -452,6 +541,8 @@ class ToolApiSourceService:
         source_url = self.validate_source_url(source_url)
         if auth_type not in _VALID_AUTH_TYPES:
             raise ToolApiSourceValidationError(f"Invalid auth type: {auth_type}")
+        if source_url:
+            self._parse_request_body(fetch_method, request_body)
         self.parse_content(content)
 
         source = ToolApiSource(
@@ -461,6 +552,8 @@ class ToolApiSourceService:
             enabled=enabled,
             owner_email=owner_email,
             source_url=source_url,
+            fetch_method=fetch_method.upper(),
+            request_body=(request_body or "").strip() or None,
             auth_type=auth_type,
             auth_header_key=(auth_header_key or "").strip() or None if auth_type == "header" else None,
             auth_credential=self._encode_credential(auth_type, auth_header_key, auth_credential),
@@ -484,6 +577,8 @@ class ToolApiSourceService:
         auth_header_key: Optional[str] = None,
         auth_credential: Optional[str] = None,
         credential_provided: bool = False,
+        fetch_method: str = "GET",
+        request_body: Optional[str] = None,
     ) -> ToolApiSource:
         """Update an existing tool API source.
 
@@ -500,6 +595,8 @@ class ToolApiSourceService:
             auth_credential: New secret (only applied when provided).
             credential_provided: Whether the form submitted a credential;
                 False keeps the previously stored secret.
+            fetch_method: HTTP method for the remote fetch (GET/POST).
+            request_body: JSON object body for POST fetches.
 
         Returns:
             The updated ToolApiSource row.
@@ -517,7 +614,11 @@ class ToolApiSourceService:
         source.description = (description or "").strip() or None
         source.content = content.strip()
         source.enabled = enabled
+        if source_url:
+            self._parse_request_body(fetch_method, request_body)
         source.source_url = source_url
+        source.fetch_method = fetch_method.upper()
+        source.request_body = (request_body or "").strip() or None
         source.auth_type = auth_type
         source.auth_header_key = (auth_header_key or "").strip() or None if auth_type == "header" else None
         if credential_provided:

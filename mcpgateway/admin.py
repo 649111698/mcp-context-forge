@@ -15285,6 +15285,7 @@ async def _render_tool_apis_partial(
                 "enabled": source.enabled,
                 "owner_email": source.owner_email,
                 "source_url": source.source_url,
+                "fetch_method": source.fetch_method or "GET",
                 "auth_type": source.auth_type or "none",
                 "has_credential": bool(source.auth_credential),
                 "last_synced_at": source.last_synced_at,
@@ -15305,6 +15306,8 @@ async def _render_tool_apis_partial(
                 "enabled": source.enabled,
                 "content": source.content,
                 "source_url": source.source_url,
+                "fetch_method": source.fetch_method or "GET",
+                "request_body": source.request_body or "",
                 "auth_type": source.auth_type or "none",
                 "auth_header_key": source.auth_header_key,
                 "has_credential": bool(source.auth_credential),
@@ -15319,6 +15322,8 @@ async def _render_tool_apis_partial(
             "enabled": form_source["enabled"],
             "content": form_source["content"],
             "source_url": form_source["source_url"] or "",
+            "fetch_method": form_source["fetch_method"],
+            "request_body": form_source["request_body"],
             "auth_type": form_source["auth_type"],
             "auth_header_key": form_source["auth_header_key"] or "",
         }
@@ -15396,6 +15401,8 @@ async def admin_tool_apis_save(
     display_name = str(form.get("display_name") or "").strip()
     description = str(form.get("description") or "").strip()
     source_url = str(form.get("source_url") or "").strip()
+    fetch_method = str(form.get("fetch_method") or "GET").strip().upper() or "GET"
+    request_body = str(form.get("request_body") or "").strip()
     auth_type = str(form.get("auth_type") or "none").strip() or "none"
     auth_header_key = str(form.get("auth_header_key") or "").strip()
     auth_credential_raw = form.get("auth_credential")
@@ -15411,6 +15418,8 @@ async def admin_tool_apis_save(
         "enabled": enabled,
         "content": content,
         "source_url": source_url,
+        "fetch_method": fetch_method,
+        "request_body": request_body,
         "auth_type": auth_type,
         "auth_header_key": auth_header_key,
     }
@@ -15423,7 +15432,7 @@ async def admin_tool_apis_save(
         # payload is stored as the content snapshot.
         if source_url:
             try:
-                fetched = (await tool_api_source_service.fetch_url_content(source_url, auth_type=auth_type, auth_credential=auth_credential or None, auth_header_key=auth_header_key or None)).strip()
+                fetched = (await tool_api_source_service.fetch_url_content(source_url, auth_type=auth_type, auth_credential=auth_credential or None, auth_header_key=auth_header_key or None, fetch_method=fetch_method, request_body=request_body or None)).strip()
                 tool_api_source_service.parse_content(fetched)
                 content = fetched
                 form_values["content"] = fetched
@@ -15443,6 +15452,8 @@ async def admin_tool_apis_save(
                 auth_header_key=auth_header_key,
                 auth_credential=auth_credential,
                 credential_provided=credential_provided,
+                fetch_method=fetch_method,
+                request_body=request_body or None,
             )
             saved_id = source_id
             message = f"Saved API '{display_name or source_id}'"
@@ -15458,6 +15469,8 @@ async def admin_tool_apis_save(
                 auth_type=auth_type,
                 auth_header_key=auth_header_key,
                 auth_credential=auth_credential,
+                fetch_method=fetch_method,
+                request_body=request_body or None,
             )
             saved_id = source.id
             message = f"Saved API '{source.display_name}'"

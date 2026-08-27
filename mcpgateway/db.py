@@ -3683,6 +3683,10 @@ class ToolApiSource(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Remote mode: fetch tool JSON from this URL on sync (None = manual JSON mode)
     source_url: Mapped[Optional[str]] = mapped_column(String(767), nullable=True)
+    # HTTP method for the fetch: "GET" or "POST"
+    fetch_method: Mapped[Optional[str]] = mapped_column(String(10), default="GET", nullable=False)
+    # JSON request body sent when fetch_method is POST
+    request_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Simple auth for the fetch: "none" | "bearer" | "basic" | "header"
     auth_type: Mapped[Optional[str]] = mapped_column(String(20), default="none", nullable=False)
     auth_header_key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
