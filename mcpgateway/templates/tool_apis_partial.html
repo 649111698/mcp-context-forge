@@ -24,7 +24,7 @@
           name="display_name"
           value="{{ form_values.get('display_name', '') }}"
           placeholder="如：金蝶AI工具组（留空自动取第一个 tool 名）"
-          class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+          class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
         />
       </div>
       <div>
@@ -35,7 +35,7 @@
           name="description"
           value="{{ form_values.get('description', '') }}"
           placeholder="可选备注"
-          class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+          class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
         />
       </div>
     </div>
@@ -53,7 +53,7 @@
             name="source_url"
             value="{{ form_values.get('source_url', '') }}"
             placeholder="https://your-server/tools.json"
-            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
           />
         </div>
         <div>
@@ -61,7 +61,7 @@
           <select
             id="tool-api-fetch-method"
             name="fetch_method"
-            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
           >
             <option value="GET" {% if form_values.get('fetch_method', 'GET') == 'GET' %}selected{% endif %}>GET</option>
             <option value="POST" {% if form_values.get('fetch_method') == 'POST' %}selected{% endif %}>POST</option>
@@ -72,7 +72,7 @@
           <select
             id="tool-api-auth-type"
             name="auth_type"
-            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
           >
             <option value="none" {% if form_values.get('auth_type', 'none') == 'none' %}selected{% endif %}>无</option>
             <option value="bearer" {% if form_values.get('auth_type') == 'bearer' %}selected{% endif %}>Bearer Token</option>
@@ -90,7 +90,7 @@
             rows="3"
             spellcheck="false"
             placeholder='{ "group": "ai", "baseUrl": "http://..." }'
-            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs font-mono leading-relaxed"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs font-mono leading-relaxed"
           >{{ form_values.get('request_body', '') }}</textarea>
         </div>
         <div class="space-y-4">
@@ -102,7 +102,7 @@
             name="auth_credential"
             autocomplete="new-password"
             placeholder="{{ '••••••' if form_source and form_source.has_credential else 'Token / 用户名:密码 / Header 值' }}"
-            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
           />
         </div>
         <div>
@@ -113,7 +113,7 @@
             name="auth_header_key"
             value="{{ form_values.get('auth_header_key', '') }}"
             placeholder="X-Api-Key"
-            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
           />
         </div>
         </div>
@@ -130,7 +130,7 @@
         rows="14"
         spellcheck="false"
         placeholder='{ "name": "queryCustomer", "url": "https://...", "integration_type": "REST", "request_type": "POST", "input_schema": { ... }, "output_schema": { ... } }'
-        class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm font-mono leading-relaxed"
+        class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm font-mono leading-relaxed"
       >{{ form_values.get('content', '') }}</textarea>
     </div>
     <div class="flex items-center">
