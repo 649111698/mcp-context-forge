@@ -3664,6 +3664,32 @@ class Tool(Base):
         )
 
 
+class ToolApiSource(Base):
+    """
+    ORM model for a saved MCP API tool definition used for repeatable tool sync.
+
+    Stores the raw tool JSON (a single tool definition or an array of tool
+    definitions). Syncing a source upserts tools by name: an existing tool
+    with the same name is overwritten with the stored definition, otherwise a
+    new tool is registered. This lets administrators update tool JSON in one
+    place and re-apply it after gateway upgrades or re-imports instead of
+    pasting the JSON into the import dialog every time.
+    """
+
+    __tablename__ = "tool_api_sources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    owner_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class Resource(Base):
     """
     ORM model for a registered Resource.

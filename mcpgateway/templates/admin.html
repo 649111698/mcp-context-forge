@@ -308,6 +308,13 @@
               <span class="sidebar-icon text-lg" :class="{ 'mr-3': !sidebarCollapsed }">🛠️</span>
               <span x-show="!sidebarCollapsed">Tools</span>
             </a>
+            <a href="#tool-apis" id="tab-tool-apis" data-testid="tool-apis-tab"
+               class="sidebar-link group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors"
+               :class="{ 'justify-center': sidebarCollapsed }"
+               data-action-click="showTab" data-arg0="tool-apis">
+              <span class="sidebar-icon text-lg" :class="{ 'mr-3': !sidebarCollapsed }">🔌</span>
+              <span x-show="!sidebarCollapsed">MCP APIs</span>
+            </a>
             {% if toolops_enabled %}
             <a href="#tool-ops" id="tab-tool-ops" data-testid="tool-ops-tab"
                class="sidebar-link group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors"
@@ -3952,6 +3959,24 @@
           </form>
         </div>
         {% endif %}
+      </div>
+      <!-- MCP APIs Panel: saved tool JSON definitions with one-click sync -->
+      <div id="tool-apis-panel" class="tab-panel hidden">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h2 class="text-2xl font-bold dark:text-gray-200">MCP APIs</h2>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Saved MCP API tool definitions. Sync applies them to the Tools catalog:
+              a tool with the same <strong>name</strong> is overwritten, unknown names are created.
+              Save a definition once and re-sync whenever the JSON changes — no more re-importing.
+            </p>
+          </div>
+        </div>
+        <div id="tool-apis-content"
+             hx-get="{{ root_path }}/admin/tool-apis/partial"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+        </div>
       </div>
       {% if toolops_enabled %}
       <div id="tool-ops-panel" class="tab-panel hidden">

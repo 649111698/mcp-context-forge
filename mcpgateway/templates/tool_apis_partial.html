@@ -1,0 +1,196 @@
+<!-- htmlhint doctype-first:false -->
+{% if refresh_tools_table %}
+<!-- Hidden reloader: refreshes the tools table after tool-affecting operations -->
+<div class="hidden" hx-get="{{ root_path }}/admin/tools/partial?page=1" hx-target="#tools-table" hx-swap="outerHTML" hx-trigger="load"></div>
+{% endif %}
+
+{% if message %}
+<div class="mb-4 rounded-lg border px-4 py-2.5 text-sm {{ 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300' if message_is_error else 'border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300' }}" role="status">
+  {{ message }}
+</div>
+{% endif %}
+
+{% if form_mode %}
+<div class="bg-white shadow rounded-lg p-6 mb-6 dark:bg-gray-800">
+  <form hx-post="{{ root_path }}/admin/tool-apis/save" hx-target="#tool-apis-content" hx-swap="innerHTML" class="space-y-4">
+    <input type="hidden" name="source_id" value="{{ form_source.id if form_source else '' }}" />
+    <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">{{ 'Edit MCP API' if form_source else 'Add MCP API' }}</h3>
+    <p class="text-xs text-gray-500 dark:text-gray-400">
+      Paste a tool definition (JSON object) or an array of tool definitions. Sync overwrites tools with the same
+      <strong>name</strong> and creates tools with new names.
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label for="tool-api-display-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Display Name</label>
+        <input
+          type="text"
+          id="tool-api-display-name"
+          name="display_name"
+          value="{{ form_values.get('display_name', '') }}"
+          placeholder="Auto-derived from the tool name when blank"
+          class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+        />
+      </div>
+      <div>
+        <label for="tool-api-description" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
+        <input
+          type="text"
+          id="tool-api-description"
+          name="description"
+          value="{{ form_values.get('description', '') }}"
+          placeholder="Optional note"
+          class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+        />
+      </div>
+    </div>
+    <div>
+      <label for="tool-api-content" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Tool JSON</label>
+      <textarea
+        id="tool-api-content"
+        name="content"
+        rows="14"
+        spellcheck="false"
+        placeholder='{ "name": "queryCustomer", "url": "https://...", "integration_type": "REST", "request_type": "POST", "input_schema": { ... }, "output_schema": { ... } }'
+        class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm font-mono leading-relaxed"
+      >{{ form_values.get('content', '') }}</textarea>
+    </div>
+    <div class="flex items-center">
+      <input
+        type="checkbox"
+        id="tool-api-enabled"
+        name="enabled"
+        {% if form_values.get('enabled', true) %}checked{% endif %}
+        class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+      />
+      <label for="tool-api-enabled" class="ml-2 text-sm text-gray-700 dark:text-gray-300">Include in "Sync All"</label>
+    </div>
+    <div class="flex items-center space-x-3 pt-2">
+      <button
+        type="submit"
+        class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+      >
+        {{ 'Save Changes' if form_source else 'Save API' }}
+      </button>
+      <button
+        type="button"
+        hx-get="{{ root_path }}/admin/tool-apis/partial"
+        hx-target="#tool-apis-content"
+        hx-swap="innerHTML"
+        class="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+      >
+        Cancel
+      </button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="flex justify-between items-center mb-3">
+  <p class="text-xs text-gray-500 dark:text-gray-400">
+    {{ rows|length }} saved API{{ '' if rows|length == 1 else 's' }} — sync overwrites tools by name and creates new ones.
+  </p>
+  <div class="flex items-center space-x-2">
+    <button
+      type="button"
+      hx-get="{{ root_path }}/admin/tool-apis/partial?form=new"
+      hx-target="#tool-apis-content"
+      hx-swap="innerHTML"
+      class="inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+    >
+      + Add API
+    </button>
+    {% if rows %}
+    <button
+      type="button"
+      hx-post="{{ root_path }}/admin/tool-apis/sync-all"
+      hx-target="#tool-apis-content"
+      hx-swap="innerHTML"
+      hx-confirm="Sync all enabled APIs? Tools with matching names will be overwritten."
+      class="inline-flex items-center py-2 px-4 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-indigo-600 dark:text-indigo-400 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+    >
+      ⟳ Sync All
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="bg-white shadow rounded-lg p-6 mb-8 dark:bg-gray-800">
+  <div id="tool-apis-table-wrapper" class="overflow-x-auto">
+    <table id="tool-apis-table" class="w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
+      <thead class="bg-gray-50 dark:bg-gray-700">
+        <tr>
+          <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider w-36">Name</th>
+          <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider w-14">Tools</th>
+          <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider">API URL</th>
+          <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider w-20 hidden min-[1340px]:table-cell">State</th>
+          <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider w-32 hidden min-[1250px]:table-cell">Last Synced</th>
+          <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider w-44">Result</th>
+          <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider w-44">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-700">
+        {% for row in rows %}
+        <tr class="transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+          <td class="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-200 truncate align-middle" title="{{ row.display_name }}">
+            <span class="font-medium">{{ row.display_name }}</span>
+            {% if row.description %}
+            <span class="block text-xs text-gray-400 truncate" title="{{ row.description }}">{{ row.description }}</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2.5 text-sm text-gray-600 dark:text-gray-300 align-middle" title="{{ row.summary.names|join(', ') }}">
+            {{ row.summary.tool_count if not row.summary.error else '—' }}
+          </td>
+          <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 truncate font-mono align-middle" title="{{ row.summary.first_url if not row.summary.error else row.summary.error }}">
+            {{ row.summary.first_url if not row.summary.error else row.summary.error }}
+          </td>
+          <td class="px-3 py-2.5 text-xs align-middle hidden min-[1340px]:table-cell">
+            {% if row.enabled %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">Enabled</span>
+            {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">Paused</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap align-middle hidden min-[1250px]:table-cell">
+            {{ row.last_synced_at.strftime('%Y-%m-%d %H:%M') if row.last_synced_at else 'Never' }}
+          </td>
+          <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 truncate align-middle" title="{{ row.last_sync_result or '' }}">
+            {{ row.last_sync_result or '—' }}
+          </td>
+          <td class="px-3 py-2.5 text-sm font-medium whitespace-nowrap align-middle">
+            <button
+              type="button"
+              hx-post="{{ root_path }}/admin/tool-apis/{{ row.id }}/sync"
+              hx-target="#tool-apis-content"
+              hx-swap="innerHTML"
+              hx-confirm="Sync '{{ row.display_name }}'? Tools with matching names will be overwritten."
+              class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-3"
+            >Sync</button>
+            <button
+              type="button"
+              hx-get="{{ root_path }}/admin/tool-apis/partial?form={{ row.id }}"
+              hx-target="#tool-apis-content"
+              hx-swap="innerHTML"
+              class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white mr-3"
+            >Edit</button>
+            <button
+              type="button"
+              hx-post="{{ root_path }}/admin/tool-apis/{{ row.id }}/delete"
+              hx-target="#tool-apis-content"
+              hx-swap="innerHTML"
+              hx-confirm="Delete saved API '{{ row.display_name }}'? Already-synced tools are kept."
+              class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
+            >Delete</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="px-3 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+            No saved APIs yet. Click <strong>+ Add API</strong> to save a tool JSON definition, then sync it here
+            whenever it changes — no need to re-import.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

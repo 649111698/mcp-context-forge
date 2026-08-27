@@ -194,6 +194,7 @@ from mcpgateway.services.structured_logger import get_structured_logger
 from mcpgateway.services.tag_service import TagService
 from mcpgateway.services.team_management_service import JoinRequestNotFoundError, TeamManagementService, UNSET
 from mcpgateway.services.token_catalog_service import TokenCatalogService
+from mcpgateway.services.tool_api_source_service import ToolApiSourceNotFoundError, ToolApiSourceValidationError, tool_api_source_service
 from mcpgateway.services.tool_service import ToolError, ToolLockConflictError, ToolNameConflictError, ToolNotFoundError, ToolService
 from mcpgateway.utils.create_jwt_token import create_jwt_token, get_jwt_token
 from mcpgateway.utils.error_formatter import ErrorFormatter, sanitize_validation_error_for_log
@@ -8267,7 +8268,9 @@ async def admin_create_user(
         )
 
         # If the user was created with the default password, optionally force password change
-        if settings.password_change_enforcement_enabled and getattr(settings, "require_password_change_for_default_password", True) and password == settings.default_user_password.get_secret_value():  # nosec B105
+        if (
+            settings.password_change_enforcement_enabled and getattr(settings, "require_password_change_for_default_password", True) and password == settings.default_user_password.get_secret_value()
+        ):  # nosec B105
             new_user.password_change_required = True
             db.commit()
 
@@ -15240,6 +15243,239 @@ async def admin_import_tools(
         # absolute catch-all: report instead of crashing
         LOGGER.exception("Fatal error in admin_import_tools")
         return ORJSONResponse({"success": False, "message": str(ex)}, status_code=500)
+
+
+####################
+# Tool API Sources (saved MCP API definitions for repeatable tool sync)
+####################
+
+
+async def _render_tool_apis_partial(
+    request: Request,
+    db: Session,
+    form_mode: Optional[str] = None,
+    form_values: Optional[Dict[str, Any]] = None,
+    message: Optional[str] = None,
+    message_is_error: bool = False,
+    refresh_tools_table: bool = False,
+) -> HTMLResponse:
+    """Render the MCP APIs panel partial with optional form and flash message.
+
+    Args:
+        request: FastAPI request (used for template rendering).
+        db: Database session.
+        form_mode: ``"new"`` or a source id to render the add/edit form;
+            ``None`` renders the list only.
+        form_values: Pre-fill values for the form (after validation errors).
+        message: Flash message shown above the list.
+        message_is_error: Whether the flash message is an error.
+        refresh_tools_table: When True, embeds a hidden HTMX reloader that
+            refreshes the tools table after tool-affecting operations.
+
+    Returns:
+        HTMLResponse with the rendered ``tool_apis_partial.html`` template.
+    """
+    rows = []
+    for source in tool_api_source_service.list_sources(db):
+        rows.append(
+            {
+                "id": source.id,
+                "display_name": source.display_name,
+                "description": source.description,
+                "enabled": source.enabled,
+                "owner_email": source.owner_email,
+                "last_synced_at": source.last_synced_at,
+                "last_sync_result": source.last_sync_result,
+                "summary": tool_api_source_service.summarize_content(source.content),
+                "content": source.content,
+            }
+        )
+
+    form_source = None
+    if form_mode and form_mode != "new":
+        try:
+            source = tool_api_source_service.get_source(db, form_mode)
+            form_source = {"id": source.id, "display_name": source.display_name, "description": source.description, "enabled": source.enabled, "content": source.content}
+        except ToolApiSourceNotFoundError:
+            form_mode = None
+
+    if form_source and form_values is None:
+        form_values = {"display_name": form_source["display_name"], "description": form_source["description"], "enabled": form_source["enabled"], "content": form_source["content"]}
+
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "tool_apis_partial.html",
+        {
+            "request": request,
+            "root_path": _resolve_root_path(request),
+            "rows": rows,
+            "form_mode": form_mode,
+            "form_source": form_source,
+            "form_values": form_values or {},
+            "message": message,
+            "message_is_error": message_is_error,
+            "refresh_tools_table": refresh_tools_table,
+        },
+    )
+
+
+@admin_router.get("/tool-apis/partial", response_class=HTMLResponse)
+@require_permission("tools.read", allow_admin_bypass=False)
+async def admin_tool_apis_partial(
+    request: Request,
+    form: Optional[str] = Query(None, description="'new' or source id to open the add/edit form"),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),  # pylint: disable=unused-argument
+) -> HTMLResponse:
+    """Render the MCP APIs panel content (list + optional form) for HTMX.
+
+    Args:
+        request: FastAPI request.
+        form: ``'new'`` or an existing source id to render the add/edit form.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        HTMLResponse with the rendered partial.
+    """
+    db.commit()  # end the read-only transaction before rendering
+    return await _render_tool_apis_partial(request, db, form_mode=form)
+
+
+@admin_router.post("/tool-apis/save")
+@require_permission("tools.create", allow_admin_bypass=False)
+async def admin_tool_apis_save(
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),
+) -> HTMLResponse:
+    """Create or update a saved tool API source from the admin form.
+
+    Args:
+        request: FastAPI request containing the form fields:
+            ``source_id`` (empty = create), ``display_name``, ``description``,
+            ``content`` (tool JSON), ``enabled`` checkbox.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        HTMLResponse re-rendering the partial; on validation errors the form
+        is re-rendered with the submitted values and an error message.
+    """
+    user_email = get_user_email(user)
+    form = await request.form()
+    source_id = str(form.get("source_id") or "").strip()
+    display_name = str(form.get("display_name") or "").strip()
+    description = str(form.get("description") or "").strip()
+    content = str(form.get("content") or "").strip()
+    enabled = form.get("enabled") is not None
+
+    try:
+        if source_id:
+            tool_api_source_service.update_source(db, source_id, display_name=display_name, description=description, content=content, enabled=enabled)
+            message = f"Saved API '{display_name or source_id}'"
+        else:
+            source = tool_api_source_service.create_source(db, display_name=display_name, description=description, content=content, enabled=enabled, owner_email=user_email)
+            message = f"Saved API '{source.display_name}'"
+        return await _render_tool_apis_partial(request, db, message=message)
+    except ToolApiSourceNotFoundError:
+        return await _render_tool_apis_partial(request, db, message="Tool API source not found", message_is_error=True)
+    except ToolApiSourceValidationError as ex:
+        return await _render_tool_apis_partial(
+            request,
+            db,
+            form_mode=source_id or "new",
+            form_values={"display_name": display_name, "description": description, "enabled": enabled, "content": content},
+            message=str(ex),
+            message_is_error=True,
+        )
+
+
+@admin_router.post("/tool-apis/sync-all")
+@require_permission("tools.create", allow_admin_bypass=False)
+async def admin_tool_apis_sync_all(
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),
+) -> HTMLResponse:
+    """Sync every enabled tool API source into the tool catalog.
+
+    Args:
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        HTMLResponse re-rendering the partial with the sync summary.
+    """
+    user_email = get_user_email(user)
+    try:
+        result = await tool_api_source_service.sync_all(db, user_email=user_email)
+        return await _render_tool_apis_partial(request, db, message=result["summary"], message_is_error=result["failed"] > 0, refresh_tools_table=True)
+    except Exception as ex:  # pylint: disable=broad-exception-caught
+        LOGGER.exception("Tool API sync-all failed")
+        return await _render_tool_apis_partial(request, db, message=f"Sync failed: {ex}", message_is_error=True)
+
+
+@admin_router.post("/tool-apis/{source_id}/sync")
+@require_permission("tools.create", allow_admin_bypass=False)
+async def admin_tool_apis_sync(
+    source_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),
+) -> HTMLResponse:
+    """Sync one saved tool API source into the tool catalog.
+
+    Existing tools with the same name are overwritten; unknown names are
+    registered as new tools.
+
+    Args:
+        source_id: Source id.
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        HTMLResponse re-rendering the partial with the sync summary.
+    """
+    user_email = get_user_email(user)
+    try:
+        result = await tool_api_source_service.sync_source(db, source_id, user_email=user_email)
+        return await _render_tool_apis_partial(request, db, message=result["summary"], message_is_error=result["failed"] > 0, refresh_tools_table=True)
+    except ToolApiSourceNotFoundError:
+        return await _render_tool_apis_partial(request, db, message="Tool API source not found", message_is_error=True)
+    except ToolApiSourceValidationError as ex:
+        return await _render_tool_apis_partial(request, db, message=str(ex), message_is_error=True)
+    except Exception as ex:  # pylint: disable=broad-exception-caught
+        LOGGER.exception("Tool API sync failed for source %s", source_id)
+        return await _render_tool_apis_partial(request, db, message=f"Sync failed: {ex}", message_is_error=True)
+
+
+@admin_router.post("/tool-apis/{source_id}/delete")
+@require_permission("tools.delete", allow_admin_bypass=False)
+async def admin_tool_apis_delete(
+    source_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),  # pylint: disable=unused-argument
+) -> HTMLResponse:
+    """Delete a saved tool API source (synced tools are kept).
+
+    Args:
+        source_id: Source id.
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        HTMLResponse re-rendering the partial.
+    """
+    try:
+        display_name = tool_api_source_service.delete_source(db, source_id)
+        return await _render_tool_apis_partial(request, db, message=f"Deleted API '{display_name}' (tools kept)")
+    except ToolApiSourceNotFoundError:
+        return await _render_tool_apis_partial(request, db, message="Tool API source not found", message_is_error=True)
 
 
 ####################
