@@ -279,7 +279,7 @@ from mcpgateway.schemas import (
 from mcpgateway.services.a2a_service import A2AAgentError, A2AAgentNameConflictError, A2AAgentNotFoundError, A2AAgentService
 from mcpgateway.services.catalog_service import CatalogRegistrationPermissionError
 from mcpgateway.services.export_service import ExportError, ExportService
-from mcpgateway.services.gateway_service import GatewayConnectionError, GatewayLookupConflictError, GatewayNotFoundError, GatewayService
+from mcpgateway.services.gateway_service import GatewayConnectionError, GatewayCredentialError, GatewayLookupConflictError, GatewayNotFoundError, GatewayService
 from mcpgateway.services.import_service import ImportError as ImportServiceError
 from mcpgateway.services.import_service import ImportService
 from mcpgateway.services.logging_service import LoggingService
@@ -7476,6 +7476,7 @@ class TestOAuthFunctionality:
         cases = [
             (GatewayDuplicateConflictError(duplicate_gateway), 409),
             (GatewayNameConflictError("name"), 409),
+            (GatewayCredentialError("Stored credential contains invalid characters"), 422),
             (ValueError("bad"), 400),
             (ValidationError.from_exception_data("test", error_details), 422),
             (IntegrityError("stmt", {}, Exception("constraint")), 409),
@@ -7504,6 +7505,7 @@ class TestOAuthFunctionality:
         cases = [
             (PermissionError("nope"), 403),
             (GatewayConnectionError("down"), 502),
+            (GatewayCredentialError("Stored credential contains invalid characters"), 422),
             (ValueError("bad"), 400),
             (RuntimeError("boom"), 500),
             (ValidationError.from_exception_data("test", error_details), 422),
@@ -7988,6 +7990,33 @@ class TestErrorHandlingPaths:
         body = json.loads(result.body)
         assert body["success"] is False
         assert "Connection failed" in body["message"]
+
+    @patch.object(GatewayService, "update_gateway")
+    async def test_admin_update_gateway_rest_credential_error(self, mock_update_gateway, mock_request, mock_db):
+        """Test updating gateway with a malformed stored credential returns 422, not a generic 500."""
+        from mcpgateway.admin import admin_update_gateway_rest
+
+        existing_gateway = MagicMock()
+        existing_gateway.owner_email = "owner@example.com"
+        existing_gateway.team_id = "team-123"
+        mock_db.get = MagicMock(return_value=existing_gateway)
+
+        mock_request.json = AsyncMock(return_value={"name": "updated-gateway", "url": "https://updated.example.com"})
+        mock_request.headers = {"content-type": "application/json"}
+
+        mock_update_gateway.side_effect = GatewayCredentialError("Stored credential contains invalid characters")
+
+        team_service = MagicMock()
+        team_service.verify_team_for_user = AsyncMock(return_value="team-123")
+
+        with patch("mcpgateway.admin.TeamManagementService", lambda db: team_service):
+            result = await admin_update_gateway_rest("gateway-123", mock_request, mock_db, user={"email": "test-user", "db": mock_db})
+
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 422
+        body = json.loads(result.body)
+        assert body["success"] is False
+        assert "Stored credential contains invalid characters" in body["message"]
 
     @patch.object(GatewayService, "update_gateway")
     async def test_admin_update_gateway_rest_runtime_error(self, mock_update_gateway, mock_request, mock_db):
@@ -16266,6 +16295,7 @@ async def test_get_plugin_details_exception(monkeypatch, mock_request, mock_db, 
 async def test_catalog_partial(monkeypatch, mock_request, mock_db):
     monkeypatch.setattr(settings, "mcpgateway_catalog_enabled", True)
     monkeypatch.setattr(settings, "mcpgateway_catalog_page_size", 2)
+    monkeypatch.setattr("mcpgateway.admin.get_scoped_resource_access_context", MagicMock(return_value=("u@example.com", ["team-a"])))
 
     server_page = SimpleNamespace(category="Dev", auth_type="api_key", provider="X", is_registered=True)
     server_all = SimpleNamespace(category="Ops", auth_type="oauth", provider="Y", is_registered=False)
@@ -16278,6 +16308,9 @@ async def test_catalog_partial(monkeypatch, mock_request, mock_db):
 
     response = await catalog_partial(mock_request, category="Dev", auth_type="api_key", search=None, page=1, db=mock_db, _user={"email": "u@example.com", "db": mock_db})
     assert isinstance(response, HTMLResponse)
+    assert mock_get_catalog.await_count == 2
+    for catalog_call in mock_get_catalog.await_args_list:
+        assert catalog_call.kwargs == {"user_email": "u@example.com", "token_teams": ["team-a"]}
     template_call = mock_request.app.state.templates.TemplateResponse.call_args
     stats = template_call[0][2]["stats"]
     assert stats["total_servers"] == 2
@@ -20651,12 +20684,15 @@ class TestCatalogEndpoints:
     @pytest.mark.asyncio
     async def test_list_catalog_servers_success(self, monkeypatch, mock_db):
         monkeypatch.setattr("mcpgateway.admin.settings.mcpgateway_catalog_enabled", True, raising=False)
+        monkeypatch.setattr("mcpgateway.admin.get_scoped_resource_access_context", MagicMock(return_value=("admin@test.com", None)))
         mock_result = MagicMock()
-        monkeypatch.setattr("mcpgateway.admin.catalog_service.get_catalog_servers", AsyncMock(return_value=mock_result))
+        mock_get_catalog = AsyncMock(return_value=mock_result)
+        monkeypatch.setattr("mcpgateway.admin.catalog_service.get_catalog_servers", mock_get_catalog)
 
         request = MagicMock(spec=Request)
         result = await list_catalog_servers(request, tags=[], db=mock_db, _user={"email": "admin@test.com"})
         assert result == mock_result
+        assert mock_get_catalog.await_args.kwargs == {"user_email": "admin@test.com", "token_teams": None}
 
     @pytest.mark.asyncio
     async def test_register_catalog_server_disabled(self, monkeypatch, mock_db):
