@@ -70,7 +70,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: gateway
-          image: registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub:v1.0.14-297468a
+          image: registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub:v1.0.15-f515870
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
