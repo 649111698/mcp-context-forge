@@ -1060,7 +1060,7 @@ export const getSelectedGatewayIds = function () {
 /**
  * Reload associated tools, resources, and prompts filtered by selected gateway IDs
  */
-const reloadAssociatedItems = function () {
+export const reloadAssociatedItems = function () {
   const selectedGatewayIds = getSelectedGatewayIds();
   // Join all selected IDs (including the special 'null' sentinel if present)
   // so the server receives a combined filter like `gateway_id=abc,null`.
