@@ -8,7 +8,7 @@
 # 镜像来源：registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub（构建后推送，见部署文档）
 services:
   gateway:
-    image: registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub:${IMAGE_TAG:-v1.0.18-145c2c0}
+    image: registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub:${IMAGE_TAG:-v1.0.19-450d210}
     container_name: mcp-hub-gateway
     restart: unless-stopped
     ports:
