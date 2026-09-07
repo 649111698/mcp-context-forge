@@ -50,6 +50,9 @@ services:
       - CSRF_COOKIE_SECURE=${CSRF_COOKIE_SECURE:-true}
       - SECURE_COOKIES=${SECURE_COOKIES:-true}
       - LOG_LEVEL=${LOG_LEVEL:-ERROR}
+      # 网页端 System Logs 需要日志落库；同时把 LOG_LEVEL 调到 INFO 才能看到
+      # 工具调用/请求等常规事件（ERROR 级别会全部滤掉）。有额外 DB 写入开销。
+      - STRUCTURED_LOGGING_DATABASE_ENABLED=${STRUCTURED_LOGGING_DATABASE_ENABLED:-false}
       # 会话时长（默认令牌仅 20 分钟；内网工具建议放宽，见 .env.aliyun.example 说明）
       - TOKEN_EXPIRY=${TOKEN_EXPIRY:-20}
       - TOKEN_IDLE_TIMEOUT=${TOKEN_IDLE_TIMEOUT:-60}
