@@ -33,6 +33,9 @@ stringData:
   JWT_SECRET_KEY: "CHANGE_ME"
   # 认证加密密钥（≥32 字符）：openssl rand -base64 32
   AUTH_ENCRYPTION_SECRET: "CHANGE_ME"
+  # 新建用户的默认密码种子（≥12 位；v1.0.20 起 #6570 安全加固强制校验，
+  # 缺失或太短容器会崩溃循环。仅数据库为空时用于种子，不影响已有用户）
+  DEFAULT_USER_PASSWORD: "CHANGE_ME"
 
 ---
 apiVersion: apps/v1
@@ -101,8 +104,13 @@ spec:
               value: "redis"
             - name: REDIS_PARSER
               value: "hiredis"
+            # System Logs 需要日志落库；LOG_LEVEL 同时调到 INFO 才能看到
+            # 工具调用/请求等常规事件（ERROR 级别会全部滤掉）。
+            # 有额外 DB 写入开销，日志默认保留 30 天自动清理
             - name: LOG_LEVEL
-              value: "ERROR"
+              value: "INFO"
+            - name: STRUCTURED_LOGGING_DATABASE_ENABLED
+              value: "true"
             # 会话时长（默认令牌仅 20 分钟；内网建议放宽，如 120/240/0）
             - name: TOKEN_EXPIRY
               value: "120"
