@@ -14,7 +14,7 @@
 <div class="bg-white shadow rounded-lg p-6 mb-6 dark:bg-gray-800">
   <form hx-post="{{ root_path }}/admin/tool-apis/save" hx-target="#tool-apis-content" hx-swap="innerHTML" class="space-y-4">
     <input type="hidden" name="source_id" value="{{ form_source.id if form_source else '' }}" />
-    <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">{{ 'Edit MCP API' if form_source else 'Add MCP API' }}</h3>
+    <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">{{ '编辑 MCP API' if form_source else '新增 MCP API' }}</h3>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label for="tool-api-display-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">名称</label>
@@ -46,7 +46,7 @@
       <p class="text-xs text-gray-500 dark:text-gray-400">填写后每次同步都会重新从该地址拉取 tool JSON；留空则使用下方手动粘贴的 JSON。</p>
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="md:col-span-2">
-          <label for="tool-api-source-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Source URL</label>
+          <label for="tool-api-source-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">来源 URL</label>
           <input
             type="text"
             id="tool-api-source-url"
@@ -141,7 +141,7 @@
         {% if form_values.get('enabled', true) %}checked{% endif %}
         class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
       />
-      <label for="tool-api-enabled" class="ml-2 text-sm text-gray-700 dark:text-gray-300">Include in "Sync All"</label>
+      <label for="tool-api-enabled" class="ml-2 text-sm text-gray-700 dark:text-gray-300">计入「全部同步」</label>
     </div>
     <div class="flex items-center space-x-3 pt-2">
       <button
@@ -176,7 +176,7 @@
 
 <div class="flex justify-between items-center mb-3">
   <p class="text-xs text-gray-500 dark:text-gray-400">
-    {{ rows|length }} saved API{{ '' if rows|length == 1 else 's' }} — sync overwrites tools by name and creates new ones.
+    已保存 {{ rows|length }} 个 API —— 同步按名称覆盖同名工具，未知名称会新建。
   </p>
   <div class="flex items-center space-x-2">
     <button
@@ -186,7 +186,7 @@
       hx-swap="innerHTML"
       class="inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
     >
-      + Add API
+      + 新增 API
     </button>
     {% if rows %}
     <button
@@ -194,10 +194,10 @@
       hx-post="{{ root_path }}/admin/tool-apis/sync-all"
       hx-target="#tool-apis-content"
       hx-swap="innerHTML"
-      hx-confirm="Sync all enabled APIs? Tools with matching names will be overwritten."
+      hx-confirm="确认同步所有已启用的 API？同名工具将被覆盖。"
       class="inline-flex items-center py-2 px-4 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-indigo-600 dark:text-indigo-400 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
     >
-      ⟳ Sync All
+      ⟳ 全部同步
     </button>
     {% endif %}
   </div>
@@ -208,13 +208,13 @@
     <table id="tool-apis-table" class="w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
       <thead class="bg-gray-50 dark:bg-gray-700">
         <tr>
-          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-36">Name</th>
-          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-14">Tools</th>
-          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400">Source</th>
-          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-20 hidden min-[1340px]:table-cell">State</th>
-          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-32 hidden min-[1250px]:table-cell">Last Synced</th>
-          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-36">Result</th>
-          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-44">Actions</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-36">名称</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-14">工具数</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400">来源</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-20 hidden min-[1340px]:table-cell">状态</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-32 hidden min-[1250px]:table-cell">最近同步</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-36">结果</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-44">操作</th>
         </tr>
       </thead>
       <tbody class="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-700">
@@ -243,13 +243,13 @@
           </td>
           <td class="px-3 py-2.5 text-xs align-middle hidden min-[1340px]:table-cell">
             {% if row.enabled %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">Enabled</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">已启用</span>
             {% else %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">Paused</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">已暂停</span>
             {% endif %}
           </td>
           <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap align-middle hidden min-[1250px]:table-cell">
-            {{ row.last_synced_at.strftime('%Y-%m-%d %H:%M') if row.last_synced_at else 'Never' }}
+            {{ row.last_synced_at.strftime('%Y-%m-%d %H:%M') if row.last_synced_at else '从未' }}
           </td>
           <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 truncate align-middle" title="{{ row.last_sync_result or '' }}">
             {{ row.last_sync_result or '—' }}
@@ -260,30 +260,30 @@
               hx-post="{{ root_path }}/admin/tool-apis/{{ row.id }}/sync"
               hx-target="#tool-apis-content"
               hx-swap="innerHTML"
-              hx-confirm="Sync '{{ row.display_name }}'? Tools with matching names will be overwritten."
+              hx-confirm="确认同步「{{ row.display_name }}」？同名工具将被覆盖。"
               class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-3"
-            >Sync</button>
+            >同步</button>
             <button
               type="button"
               hx-get="{{ root_path }}/admin/tool-apis/partial?form={{ row.id }}"
               hx-target="#tool-apis-content"
               hx-swap="innerHTML"
               class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white mr-3"
-            >Edit</button>
+            >编辑</button>
             <button
               type="button"
               hx-post="{{ root_path }}/admin/tool-apis/{{ row.id }}/delete"
               hx-target="#tool-apis-content"
               hx-swap="innerHTML"
-              hx-confirm="Delete saved API '{{ row.display_name }}'? Already-synced tools are kept."
+              hx-confirm="确认删除已保存的 API「{{ row.display_name }}」？已同步的工具会保留。"
               class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-            >Delete</button>
+            >删除</button>
           </td>
         </tr>
         {% else %}
         <tr>
           <td colspan="7" class="px-3 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
-            No saved APIs yet. Click <strong>+ Add API</strong> to save a tool JSON definition or a fetch URL, then sync it here — no need to re-import.
+            还没有保存的 API。点击 <strong>+ 新增 API</strong> 保存一份 tool JSON 定义或拉取地址，之后在这里一键同步，无需重新导入。
           </td>
         </tr>
         {% endfor %}

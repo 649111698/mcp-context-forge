@@ -197,7 +197,7 @@ async def test_sync_source_item_failure_is_reported(service, mock_db):
         result = await service.sync_source(mock_db, "src1")
     assert result["failed"] == 1
     assert any("boom" in err for err in result["errors"])
-    assert "1 failed" in result["summary"]
+    assert "失败 1" in result["summary"]
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_sync_all_skips_disabled_sources(service, mock_db):
     with patch.object(service, "list_sources", return_value=[make_source(enabled=False)]), patch("mcpgateway.services.tool_api_source_service.tool_service", async_tool_service()) as tool_svc:
         result = await service.sync_all(mock_db, "admin@example.com")
     tool_svc.register_tool.assert_not_called()
-    assert "0 created" in result["summary"]
+    assert "新建 0" in result["summary"]
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +268,7 @@ def test_credential_none_mode(service):
 @pytest.mark.asyncio
 async def test_fetch_content_requires_url(service):
     """Fetching a manual-mode source is a validation error."""
-    with pytest.raises(ToolApiSourceValidationError, match="no source URL"):
+    with pytest.raises(ToolApiSourceValidationError, match="没有配置拉取 URL"):
         await service.fetch_content(make_source())
 
 
@@ -367,11 +367,11 @@ def test_parse_request_body_validation(service):
     assert service._parse_request_body("GET", '{"a": 1}') is None
     assert service._parse_request_body("POST", "") is None
     assert service._parse_request_body("POST", '{"a": 1}') == {"a": 1}
-    with pytest.raises(ToolApiSourceValidationError, match="valid JSON"):
+    with pytest.raises(ToolApiSourceValidationError, match="不是合法 JSON"):
         service._parse_request_body("POST", "{oops")
-    with pytest.raises(ToolApiSourceValidationError, match="JSON object"):
+    with pytest.raises(ToolApiSourceValidationError, match="必须是 JSON 对象"):
         service._parse_request_body("POST", "[1]")
-    with pytest.raises(ToolApiSourceValidationError, match="Invalid fetch method"):
+    with pytest.raises(ToolApiSourceValidationError, match="无效的请求方法"):
         service._parse_request_body("DELETE", None)
 
 

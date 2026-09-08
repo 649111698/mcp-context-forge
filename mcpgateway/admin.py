@@ -15504,7 +15504,7 @@ async def admin_tool_apis_save(
                 request_body=request_body or None,
             )
             saved_id = source_id
-            message = f"Saved API '{display_name or source_id}'"
+            message = f"已保存 API「{display_name or source_id}」"
         else:
             source = tool_api_source_service.create_source(
                 db,
@@ -15521,14 +15521,14 @@ async def admin_tool_apis_save(
                 request_body=request_body or None,
             )
             saved_id = source.id
-            message = f"Saved API '{source.display_name}'"
+            message = f"已保存 API「{source.display_name}」"
 
         if save_and_sync:
             result = await tool_api_source_service.sync_source(db, saved_id, user_email=user_email)
             return await _render_tool_apis_partial(request, db, message=f"{message} — {result['summary']}", message_is_error=result["failed"] > 0, refresh_tools_table=True)
         return await _render_tool_apis_partial(request, db, message=message)
     except ToolApiSourceNotFoundError:
-        return await _render_tool_apis_partial(request, db, message="Tool API source not found", message_is_error=True)
+        return await _render_tool_apis_partial(request, db, message="未找到该 API 源", message_is_error=True)
     except ToolApiSourceValidationError as ex:
         return await error_page(str(ex))
 
@@ -15556,7 +15556,7 @@ async def admin_tool_apis_sync_all(
         return await _render_tool_apis_partial(request, db, message=result["summary"], message_is_error=result["failed"] > 0, refresh_tools_table=True)
     except Exception as ex:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Tool API sync-all failed")
-        return await _render_tool_apis_partial(request, db, message=f"Sync failed: {ex}", message_is_error=True)
+        return await _render_tool_apis_partial(request, db, message=f"同步失败：{ex}", message_is_error=True)
 
 
 @admin_router.post("/tool-apis/{source_id}/sync")
@@ -15586,12 +15586,12 @@ async def admin_tool_apis_sync(
         result = await tool_api_source_service.sync_source(db, source_id, user_email=user_email)
         return await _render_tool_apis_partial(request, db, message=result["summary"], message_is_error=result["failed"] > 0, refresh_tools_table=True)
     except ToolApiSourceNotFoundError:
-        return await _render_tool_apis_partial(request, db, message="Tool API source not found", message_is_error=True)
+        return await _render_tool_apis_partial(request, db, message="未找到该 API 源", message_is_error=True)
     except ToolApiSourceValidationError as ex:
         return await _render_tool_apis_partial(request, db, message=str(ex), message_is_error=True)
     except Exception as ex:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Tool API sync failed for source %s", source_id)
-        return await _render_tool_apis_partial(request, db, message=f"Sync failed: {ex}", message_is_error=True)
+        return await _render_tool_apis_partial(request, db, message=f"同步失败：{ex}", message_is_error=True)
 
 
 @admin_router.post("/tool-apis/{source_id}/delete")
@@ -15615,9 +15615,9 @@ async def admin_tool_apis_delete(
     """
     try:
         display_name = tool_api_source_service.delete_source(db, source_id)
-        return await _render_tool_apis_partial(request, db, message=f"Deleted API '{display_name}' (tools kept)")
+        return await _render_tool_apis_partial(request, db, message=f"已删除 API「{display_name}」（工具保留）")
     except ToolApiSourceNotFoundError:
-        return await _render_tool_apis_partial(request, db, message="Tool API source not found", message_is_error=True)
+        return await _render_tool_apis_partial(request, db, message="未找到该 API 源", message_is_error=True)
 
 
 ####################

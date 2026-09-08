@@ -130,7 +130,7 @@ class ToolApiSourceService:
             return None
         url = source_url.strip()
         if not url.lower().startswith(("http://", "https://")):
-            raise ToolApiSourceValidationError("Source URL must start with http:// or https://")
+            raise ToolApiSourceValidationError("来源 URL 必须以 http:// 或 https:// 开头")
         return url
 
     def _encode_credential(self, auth_type: str, auth_header_key: Optional[str], credential: Optional[str]) -> Optional[str]:
@@ -179,7 +179,7 @@ class ToolApiSourceService:
             credential = data.get("credential", "")
             header_key = data.get("header_key") or source.auth_header_key
         except Exception as ex:  # pylint: disable=broad-exception-caught
-            raise ToolApiSourceValidationError(f"Failed to decrypt stored credential: {ex}") from ex
+            raise ToolApiSourceValidationError(f"解密已存凭据失败：{ex}") from ex
 
         if source.auth_type == "bearer":
             return {"Authorization": f"Bearer {credential}"}
@@ -190,7 +190,7 @@ class ToolApiSourceService:
             return {"Authorization": f"Basic {b64}"}
         if source.auth_type == "header":
             if not header_key:
-                raise ToolApiSourceValidationError("Custom header auth requires a header name")
+                raise ToolApiSourceValidationError("自定义 Header 鉴权需要填写 Header 名称")
             return {header_key: credential}
         return {}
 
@@ -216,11 +216,11 @@ class ToolApiSourceService:
             >>> try:
             ...     asyncio.run(svc.fetch_content(S()))
             ... except ToolApiSourceValidationError as e:
-            ...     "no source URL" in str(e)
+            ...     "没有配置拉取 URL" in str(e)
             True
         """
         if not source.source_url:
-            raise ToolApiSourceValidationError("Source has no source URL")
+            raise ToolApiSourceValidationError("该源没有配置拉取 URL")
         headers = self._build_fetch_headers(source)
         method = (source.fetch_method or "GET").upper()
         json_body = self._parse_request_body(method, source.request_body)
@@ -256,7 +256,7 @@ class ToolApiSourceService:
             headers["Authorization"] = "Basic " + base64.b64encode(auth_credential.encode("utf-8")).decode("ascii")
         elif auth_type == "header" and auth_credential:
             if not auth_header_key:
-                raise ToolApiSourceValidationError("Custom header auth requires a header name")
+                raise ToolApiSourceValidationError("自定义 Header 鉴权需要填写 Header 名称")
             headers[auth_header_key] = auth_credential
         method = (fetch_method or "GET").upper()
         json_body = self._parse_request_body(method, request_body)
@@ -285,19 +285,19 @@ class ToolApiSourceService:
             >>> try:
             ...     ToolApiSourceService._parse_request_body("POST", '[1]')
             ... except ToolApiSourceValidationError as e:
-            ...     "JSON object" in str(e)
+            ...     "JSON 对象" in str(e)
             True
         """
         if method not in ("GET", "POST"):
-            raise ToolApiSourceValidationError(f"Invalid fetch method: {method}")
+            raise ToolApiSourceValidationError(f"无效的请求方法：{method}")
         if method == "GET" or not request_body or not request_body.strip():
             return None
         try:
             body = orjson.loads(request_body)
         except orjson.JSONDecodeError as ex:
-            raise ToolApiSourceValidationError(f"Request body is not valid JSON: {ex}") from ex
+            raise ToolApiSourceValidationError(f"请求 Body 不是合法 JSON：{ex}") from ex
         if not isinstance(body, dict):
-            raise ToolApiSourceValidationError("Request body must be a JSON object")
+            raise ToolApiSourceValidationError("请求 Body 必须是 JSON 对象")
         return body
 
     @staticmethod
@@ -331,7 +331,7 @@ class ToolApiSourceService:
             return
         is_error = payload.get("success") is False or (payload.get("errorCode") and payload.get("status") is False)
         if is_error:
-            raise ToolApiSourceValidationError(str(payload.get("message") or payload.get("error_desc") or f"Upstream error: {payload.get('errorCode')}"))
+            raise ToolApiSourceValidationError(str(payload.get("message") or payload.get("error_desc") or f"上游错误：{payload.get('errorCode')}"))
 
     @staticmethod
     async def _fetch_url(source_url: str, headers: Dict[str, str], method: str = "GET", json_body: Optional[Dict[str, Any]] = None) -> str:
@@ -358,11 +358,11 @@ class ToolApiSourceService:
                 else:
                     response = await client.get(source_url, headers=headers)
         except httpx.HTTPError as ex:
-            raise ToolApiSourceValidationError(f"Failed to fetch {source_url}: {ex}") from ex
+            raise ToolApiSourceValidationError(f"拉取 {source_url} 失败：{ex}") from ex
         if response.status_code in (401, 403):
-            raise ToolApiSourceValidationError(f"Fetch returned {response.status_code} — check the auth settings")
+            raise ToolApiSourceValidationError(f"拉取返回 HTTP {response.status_code} —— 请检查鉴权配置")
         if response.status_code != 200:
-            raise ToolApiSourceValidationError(f"Fetch returned HTTP {response.status_code}")
+            raise ToolApiSourceValidationError(f"拉取返回 HTTP {response.status_code}")
         ToolApiSourceService._check_error_envelope(response.text)
         return response.text
 
@@ -388,24 +388,24 @@ class ToolApiSourceService:
             2
         """
         if not content or not content.strip():
-            raise ToolApiSourceValidationError("Tool JSON is empty")
+            raise ToolApiSourceValidationError("Tool JSON 为空")
         try:
             payload = orjson.loads(content)
         except orjson.JSONDecodeError as ex:
-            raise ToolApiSourceValidationError(f"Invalid JSON: {ex}") from ex
+            raise ToolApiSourceValidationError(f"JSON 不合法：{ex}") from ex
 
         items = payload if isinstance(payload, list) else [payload]
         if not items:
-            raise ToolApiSourceValidationError("Tool JSON array is empty")
+            raise ToolApiSourceValidationError("Tool JSON 数组为空")
 
         for index, item in enumerate(items):
             if not isinstance(item, dict):
-                raise ToolApiSourceValidationError(f"Tool definition #{index + 1} must be a JSON object")
+                raise ToolApiSourceValidationError(f"第 {index + 1} 个工具定义必须是 JSON 对象")
             name = item.get("name")
             if not name or not isinstance(name, str) or not name.strip():
-                raise ToolApiSourceValidationError(f"Tool definition #{index + 1} is missing a 'name'")
+                raise ToolApiSourceValidationError(f"第 {index + 1} 个工具定义缺少 'name'")
             if not item.get("url"):
-                raise ToolApiSourceValidationError(f"Tool '{name}' is missing a 'url'")
+                raise ToolApiSourceValidationError(f"工具 '{name}' 缺少 'url'")
         return items
 
     def summarize_content(self, content: str) -> Dict[str, Any]:
@@ -423,7 +423,7 @@ class ToolApiSourceService:
             >>> summary = svc.summarize_content('{"name": "t1", "url": "http://x"}')
             >>> summary["tool_count"], summary["first_url"]
             (1, 'http://x')
-            >>> svc.summarize_content("not json")["error"].startswith("Invalid JSON")
+            >>> svc.summarize_content("not json")["error"].startswith("JSON 不合法")
             True
         """
         try:
@@ -493,12 +493,12 @@ class ToolApiSourceService:
             ...     db.execute.return_value.scalars.return_value.one_or_none.return_value = None
             ...     asyncio.run(svc.get_source(db, "missing"))
             ... except ToolApiSourceNotFoundError as e:
-            ...     "not found" in str(e).lower()
+            ...     "未找到该 API 源" in str(e)
             True
         """
         source = db.execute(select(ToolApiSource).where(ToolApiSource.id == source_id)).scalars().one_or_none()
         if not source:
-            raise ToolApiSourceNotFoundError(f"Tool API source not found: {source_id}")
+            raise ToolApiSourceNotFoundError(f"未找到该 API 源：{source_id}")
         return source
 
     def create_source(
@@ -540,7 +540,7 @@ class ToolApiSourceService:
         """
         source_url = self.validate_source_url(source_url)
         if auth_type not in _VALID_AUTH_TYPES:
-            raise ToolApiSourceValidationError(f"Invalid auth type: {auth_type}")
+            raise ToolApiSourceValidationError(f"无效的鉴权方式：{auth_type}")
         if source_url:
             self._parse_request_body(fetch_method, request_body)
         self.parse_content(content)
@@ -608,7 +608,7 @@ class ToolApiSourceService:
         source = self.get_source(db, source_id)
         source_url = self.validate_source_url(source_url)
         if auth_type not in _VALID_AUTH_TYPES:
-            raise ToolApiSourceValidationError(f"Invalid auth type: {auth_type}")
+            raise ToolApiSourceValidationError(f"无效的鉴权方式：{auth_type}")
         self.parse_content(content)
         source.display_name = (display_name or "").strip() or self.derive_display_name(content)
         source.description = (description or "").strip() or None
@@ -699,7 +699,7 @@ class ToolApiSourceService:
 
                 if existing is not None and existing.gateway_id is not None:
                     skipped += 1
-                    errors.append(f"Tool '{name}' is managed by a gateway; skipped")
+                    errors.append(f"工具「{name}」由网关管理，已跳过")
                     continue
 
                 payload = {key: value for key, value in item.items() if key in _CREATE_FIELDS}
@@ -728,11 +728,11 @@ class ToolApiSourceService:
                     logger.info("Tool API sync created tool '%s'", name)
             except (ValidationError, ToolError) as ex:
                 failed += 1
-                errors.append(f"Tool '{name}': {ex}")
+                errors.append(f"工具「{name}」：{ex}")
                 logger.warning("Tool API sync failed for tool '%s': %s", name, ex)
             except Exception as ex:  # pylint: disable=broad-exception-caught
                 failed += 1
-                errors.append(f"Tool '{name}': {ex}")
+                errors.append(f"工具「{name}」：{ex}")
                 logger.error("Tool API sync error for tool '%s': %s", name, ex)
 
         summary = self._format_summary(created, updated, skipped, failed, errors)
@@ -764,8 +764,8 @@ class ToolApiSourceService:
             for key in totals:
                 totals[key] += result[key]
 
-        errors_note = "" if totals["failed"] == 0 else f", {totals['failed']} failed"
-        summary = f"Sync all: {totals['created']} created, {totals['updated']} updated, {totals['skipped']} skipped{errors_note} across {len(results)} source(s)"
+        errors_note = "" if totals["failed"] == 0 else f"，失败 {totals['failed']}"
+        summary = f"全部同步：新建 {totals['created']}，更新 {totals['updated']}，跳过 {totals['skipped']}{errors_note}，共 {len(results)} 个源"
         return {**totals, "results": results, "summary": summary}
 
     @staticmethod
@@ -784,14 +784,14 @@ class ToolApiSourceService:
 
         Examples:
             >>> ToolApiSourceService._format_summary(1, 2, 0, 0, [])
-            '1 created, 2 updated, 0 skipped'
+            '新建 1，更新 2，跳过 0'
             >>> ToolApiSourceService._format_summary(0, 0, 0, 1, ["Tool 'x': boom"])
-            "0 created, 0 updated, 0 skipped, 1 failed — Tool 'x': boom"
+            "新建 0，更新 0，跳过 0，失败 1 —— Tool 'x': boom"
         """
-        base = f"{created} created, {updated} updated, {skipped} skipped"
+        base = f"新建 {created}，更新 {updated}，跳过 {skipped}"
         if failed:
-            first_error = errors[0] if errors else "unknown error"
-            return f"{base}, {failed} failed — {first_error}"
+            first_error = errors[0] if errors else "未知错误"
+            return f"{base}，失败 {failed} —— {first_error}"
         return base
 
 
