@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 Allow email users without local password hashes.
 
 Revision ID: 5e211ec89cad
-Revises: 12d4a0c7789c
+Revises: c5d7e9f1a3b4
 Create Date: 2026-09-04 09:37:21.131648
 """
 
@@ -21,8 +21,11 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
+# down_revision repointed to the fork head (c5d7e9f1a3b4, fork-custom
+# tool_api_sources chain also branching off 12d4a0c7789c) to keep a single
+# linear head; upstream's original parent was 12d4a0c7789c.
 revision: str = "5e211ec89cad"  # pragma: allowlist secret
-down_revision: Union[str, Sequence[str], None] = "12d4a0c7789c"  # pragma: allowlist secret
+down_revision: Union[str, Sequence[str], None] = "c5d7e9f1a3b4"  # pragma: allowlist secret
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
