@@ -17,12 +17,14 @@
 
 | remote | 地址 | 用途 |
 |--------|------|------|
-| `origin` | github.com/649111698/mcp-context-forge | GitHub 上的 fork（用户在此点 Sync fork） |
-| `upstream` | github.com/IBM/mcp-context-forge | IBM 上游 |
-| `gitlab` | code.moldfun.com/ai/mcp-context-forge | **公司 GitLab 工作仓库**（fork 自 gitlab-mirror，含全部二开） |
-| `gitlab-mirror` | code.moldfun.com/ai/upstream/mcp-context-forge | GitLab 上的上游镜像（**只放上游内容，禁止推定制代码**） |
+| `gitlab` | code.moldfun.com/ai/mcp-context-forge | **主仓库**（唯一推送目标，含全部二开） |
+| `upstream` | github.com/IBM/mcp-context-forge | IBM 上游（只拉不合并不推送） |
+| `origin` | github.com/649111698/mcp-context-forge | GitHub fork，**仅作异地备份**（可选推送） |
 
-- **访问 GitHub 必须走本地代理**：`git -c http.proxy=http://127.0.0.1:7897 <fetch/push> ...`，失败就重试 3–5 次（GFW 抖动，SSL_ERROR_SYSCALL 是常态）
+- **访问 GitHub 走本地代理**：`git -c http.proxy=http://127.0.0.1:7897 <fetch/push> ...`，失败重试 3–5 次（GFW 抖动是常态）
+- **免代理备选拉上游**（代理不通时用，已验证可用）：
+  `git -c http.proxy= -c https.proxy= fetch https://ghfast.top/https://github.com/IBM/mcp-context-forge.git refs/heads/main:refs/remotes/upstream/main`
+- 结构为 WeKnora 模式（2026-09-11 起）：单仓库 + 直接拉上游合并，**没有** GitLab 上游镜像/fork 关系（旧的 `ai/upstream/*` 已删除，不要再建）
 - GitLab 直连即可；git 凭据在 macOS 钥匙串（用户 xie）。GitLab REST API 不收密码，需要时用 OAuth 密码换 token（scope=api，2 小时过期）
 - 镜像仓库：阿里云 ACR `registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub`（docker 已登录）
 
@@ -34,13 +36,15 @@
 - 敏感文件（**永不提交**）：`.env.aliyun.local`（DATABASE_URL/JWT_SECRET_KEY/IMAGE_TAG/DEFAULT_USER_PASSWORD 等）、`.deploy-credentials.txt`
 - macOS 本机 venv 装不了 psycopg-c（无 libpq），**导入冒烟必须覆盖** `DATABASE_URL="sqlite:///./mcp.db"`
 
-## 3. 同步流程（用户说「fork了，你合并下」时执行）
+## 3. 同步流程（用户说「同步」/「fork了」时执行）
 
-1. **拉取合并**：
+1. **拉上游合并**（不依赖 GitHub fork，用户无需任何操作）：
    ```bash
-   git fetch origin || git -c http.proxy=http://127.0.0.1:7897 fetch origin
-   git -c http.proxy=http://127.0.0.1:7897 fetch upstream
-   git merge origin/main   # 用户已在 GitHub 点过 Sync fork，通常是 fast-forward
+   git -c http.proxy=http://127.0.0.1:7897 fetch upstream \
+     || git -c http.proxy= -c https.proxy= fetch \
+          https://ghfast.top/https://github.com/IBM/mcp-context-forge.git \
+          refs/heads/main:refs/remotes/upstream/main   # 免代理备选
+   git merge upstream/main
    ```
 2. **⚠️ alembic 多头检查（每次必做，漏了会启动崩溃循环）**：
    ```bash
@@ -113,13 +117,12 @@
    #   uv run --no-project python -m mcpgateway.utils.create_jwt_token \
    #     --username admin@example.com --admin -e 30 --secret "$JWT_SECRET_KEY"
    ```
-7. **提交推送（四处）**：
+7. **提交推送（主 GitLab，备份 GitHub）**：
    ```bash
    git add docker-compose.aliyun.yml k8s/mcp-hub.yaml
    git commit -s -m "chore: bump image to v1.0.10-$SHA (sync #N)"
-   git -c http.proxy=http://127.0.0.1:7897 push origin main      # 失败重试 3-5 次
-   git push gitlab main                                          # 公司 GitLab 工作仓库
-   git push gitlab-mirror refs/remotes/upstream/main:refs/heads/main   # 上游镜像（仅上游内容）
+   git push gitlab main            # 主仓库
+   git -c http.proxy=http://127.0.0.1:7897 push origin main   # 异地备份（可选，失败重试 3-5 次）
    ```
 
 ## 4. 生产环境（K8s）升级 runbook
@@ -146,7 +149,7 @@ kubectl -n mcp-hub rollout status deploy/mcp-hub-gateway
 
 1. 永不提交 `.env.aliyun.local`、`.deploy-credentials.txt`、任何真实密钥/签名
 2. 永不 `kubectl apply` 仓库版 Secret 到生产
-3. `gitlab-mirror` 只推上游内容（`refs/remotes/upstream/main`），推了定制代码会污染 fork 源头
+3. 推送目标只有两个：`gitlab`（主）和 `origin`（备份）。上游只在 GitHub，**拉过来合并即可，永远不要往任何远端再单独维护上游镜像**
 4. 汉化只碰 fork 自有文案；上游模板文案动了会给用户的 GitHub Sync fork 制造冲突
 5. 上游文件若确需小改（如 5e211ec89cad 的 down_revision repoint），必须带注释说明是 fork 定制，方便未来合并时识别
 6. 没有用户指令（「fork了」等）不要主动构建/部署/推送
