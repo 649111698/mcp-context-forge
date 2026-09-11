@@ -2,6 +2,14 @@
 
 Guidelines for AI coding assistants working with this repository.
 
+<!-- FORK-CUSTOM-START (pexetech/mcp-hub) — do not remove; kept in one block to avoid upstream merge conflicts -->
+> **⚠️ This is the Pexetech fork.** Before doing ANY sync/build/deploy work, read
+> [`AGENT-PLAYBOOK.md`](AGENT-PLAYBOOK.md) — the authoritative ops manual for this fork's
+> customization (tool_apis feature, image build overlay with China mirrors, alembic
+> multi-head checkpoint, ACR/K8s deployment, GitLab remotes). It encodes hard-won
+> pitfalls; skipping it WILL break the build.
+<!-- FORK-CUSTOM-END -->
+
 For domain-specific guidance, see subdirectory AGENTS.md files:
 - `tests/AGENTS.md` - Testing conventions and workflows
 - `plugins/AGENTS.md` - Plugin framework and development
