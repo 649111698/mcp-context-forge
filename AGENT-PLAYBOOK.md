@@ -24,7 +24,7 @@
 - **访问 GitHub 走本地代理**：`git -c http.proxy=http://127.0.0.1:7897 <fetch/push> ...`，失败重试 3–5 次（GFW 抖动是常态）
 - **免代理备选拉上游**（代理不通时用，已验证可用）：
   `git -c http.proxy= -c https.proxy= fetch https://ghfast.top/https://github.com/IBM/mcp-context-forge.git refs/heads/main:refs/remotes/upstream/main`
-- 结构为 WeKnora 模式（2026-09-11 起）：单仓库 + 直接拉上游合并，**没有** GitLab 上游镜像/fork 关系（旧的 `ai/upstream/*` 已删除，不要再建）
+- 结构为 WeKnora 模式（2026-09-11 起）：单仓库 + 直接拉上游合并，**没有** GitLab 上游镜像/fork 关系（旧的 `ai/upstream/*` 已删除，不要再建）。GitLab 仓库**只保留 main 一个分支、零 tag**——上游 release tag 只留在本地作参考，永远不要 `--tags` 推到 GitLab（2026-09-11 已清理过一次 13 个上游 tag）
 - GitLab 直连即可；git 凭据在 macOS 钥匙串（用户 xie）。GitLab REST API 不收密码，需要时用 OAuth 密码换 token（scope=api，2 小时过期）
 - 镜像仓库：阿里云 ACR `registry.cn-shanghai.aliyuncs.com/pexetech/mcp-hub`（docker 已登录）
 
@@ -121,7 +121,7 @@
    ```bash
    git add docker-compose.aliyun.yml k8s/mcp-hub.yaml
    git commit -s -m "chore: bump image to v1.0.10-$SHA (sync #N)"
-   git push gitlab main            # 主仓库
+   git push gitlab main            # 主仓库（只推 main，不带 --tags）
    git -c http.proxy=http://127.0.0.1:7897 push origin main   # 异地备份（可选，失败重试 3-5 次）
    ```
 
