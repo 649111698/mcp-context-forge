@@ -451,12 +451,8 @@ setup:                          ## 🚀 First-time setup: copy .env.example → 
         js-build
 
 ## --- JS build ----------------------------------------------------------------
-js-build:                        ## Install npm dependencies and build CSS and JS bundles
-	@if command -v npm >/dev/null 2>&1; then \
-		npm install --no-audit --no-fund && npm run build:css && npm run vite:build; \
-	else \
-		echo "WARNING: npm not found — skipping JS bundle build (admin UI may not load)"; \
-	fi
+js-build:                        ## Install npm dependencies and build CSS and JS bundles (delegates to build-ui)
+	@$(MAKE) build-ui
 
 ## --- Primary servers ---------------------------------------------------------
 serve: install js-build                  ## Run production server with Gunicorn + Uvicorn (default)
@@ -857,10 +853,11 @@ clean:
 # =============================================================================
 # help: 🧪 TESTING
 # help: smoketest            - Run smoketest.py --verbose (build container, add MCP server, test endpoints)
-# help: test-mcp-protocol-e2e - MCP protocol E2E via mcp SDK client against live gateway (K=<filter> to pick one; MCP_E2E_CLIENT_TIMEOUT env to extend the 5s client timeout)
-# help: test-mcp-cli         - [DEPRECATED] Alias for test-mcp-protocol-e2e (accepts same K=<filter>)
+# help: test-e2e             - Consolidated MCP protocol and RBAC E2E suite against live gateway (K=<filter>; MCP_E2E_CLIENT_TIMEOUT extends 5s client timeout)
+# help: test-mcp-protocol-e2e - [DEPRECATED] Alias for test-e2e (accepts same K=<filter>)
+# help: test-mcp-cli         - [DEPRECATED] Alias for test-e2e (accepts same K=<filter>)
 # help: test-bats            - Run bats tests for git tooling (tests/bash; requires bats)
-# help: test-mcp-rbac        - RBAC + multi-transport MCP protocol tests (needs live gateway + SSE)
+# help: test-mcp-rbac        - [DEPRECATED] Alias for test-e2e (accepts same K=<filter>)
 # help: test-mcp-access-matrix - MCP role/access matrix (Rust transport, edge/full mode)
 # help: test-mcp-plugin-parity - MCP plugin parity E2E for current Python or Rust stack
 # help: test-mcp-session-isolation - MCP session/auth isolation tests for Rust public transport
@@ -900,8 +897,8 @@ clean:
 # help: query-log-analyze    - Analyze query log for N+1 patterns and slow queries
 # help: query-log-clear      - Clear database query log files
 
-.PHONY: smoketest test-mcp-cli test-mcp-rbac test-mcp-plugin-parity test-mcp-access-matrix \
-	test-mcp-session-isolation test-mcp-session-isolation-load test-e2e-sso \
+.PHONY: smoketest test-e2e test-mcp-cli test-mcp-protocol-e2e test-mcp-rbac test-mcp-plugin-parity test-mcp-access-matrix \
+	test-mcp-session-isolation test-mcp-session-isolation-load test-e2e-sso test-oauth-status-live \
 	test-live-gateway test test-verbose test-profile coverage test-docs pytest-examples \
 	test-curl htmlcov doctest doctest-verbose doctest-coverage doctest-check test-db-perf \
 	test-db-perf-verbose 2025-11-25 2025-11-25-core 2025-11-25-tasks 2025-11-25-auth \
@@ -916,7 +913,7 @@ clean:
 # a running gateway (`make testing-up`), Keycloak/Entra (sso/), or the Rust
 # transport (e2e_rust/).
 # Invoke via `make test-live-gateway` (everything) or a targeted helper
-# (test-mcp-protocol-e2e, test-mcp-rbac, test-mcp-plugin-parity,
+# (test-e2e, test-mcp-plugin-parity,
 # test-mcp-access-matrix, test-mcp-session-isolation, test-e2e-sso).
 PYTEST_IGNORE := tests/fuzz tests/manual test.py \
     tests/live_gateway
@@ -931,20 +928,24 @@ smoketest:
 	@$(VENV_DIR)/bin/python ./smoketest.py --verbose || { echo "❌ Smoketest failed!"; exit 1; }
 	@echo "✅ Smoketest passed!"
 
-test-mcp-protocol-e2e: uv  ## MCP protocol E2E via mcp SDK client (K=<filter> to pick one)
-	@echo "🔌 Running MCP protocol E2E tests against $${MCP_CLI_BASE_URL:-http://localhost:8080}..."
+test-e2e: uv  ## Consolidated E2E suite against live gateway (3 replicas)
+	@echo "🧪 Running E2E suite against $${MCP_CLI_BASE_URL:-http://localhost:8080}..."
 	@echo "   Env: MCP_CLI_BASE_URL (gateway URL)  JWT_SECRET_KEY  PLATFORM_ADMIN_EMAIL"
 	@echo "   MCP Apps: set MCPGATEWAY_MCP_APPS_ENABLED=true for both testing-up and this target"
 	@echo "   Timeout: $${MCP_E2E_CLIENT_TIMEOUT:-5.0}s per client operation (override MCP_E2E_CLIENT_TIMEOUT)"
+	@echo "   Requires: docker-compose stack with SSE gateway registered"
 	@if [ -n "$(K)" ]; then echo "   Filter: -k \"$(K)\""; fi
-	@$(UV_BIN) run pytest tests/live_gateway/mcp/test_mcp_protocol_e2e.py $(if $(K),-k "$(K)") -v -s --tb=short \
-		|| { echo "❌ MCP protocol E2E tests failed!"; exit 1; }
-	@echo "✅ MCP protocol E2E tests passed!"
+	@$(UV_BIN) run pytest -p playwright tests/live_gateway/e2e/test_e2e.py $(if $(K),-k "$(K)") -v -s --tb=short \
+		|| { echo "❌ E2E suite failed!"; exit 1; }
+	@echo "✅ E2E suite passed!"
 
-# deprecated: test-mcp-cli       - Use "make test-mcp-protocol-e2e" instead (v1.2.0)
-test-mcp-cli:
-	$(call deprecated_target,test-mcp-cli,make test-mcp-protocol-e2e,1.2.0)
-	@$(MAKE) --no-print-directory test-mcp-protocol-e2e K="$(K)"
+# deprecated: test-mcp-protocol-e2e - Use "make test-e2e" instead (v1.3.0)
+test-mcp-protocol-e2e: test-e2e
+	$(call deprecated_target,test-mcp-protocol-e2e,make test-e2e,1.3.0)
+
+# deprecated: test-mcp-cli - Use "make test-e2e" instead (v1.3.0)
+test-mcp-cli: test-e2e
+	$(call deprecated_target,test-mcp-cli,make test-e2e,1.3.0)
 
 .PHONY: test-bats
 test-bats:                     ## 🧪  Run bats tests for git tooling (tests/bash)
@@ -958,13 +959,9 @@ test-bats:                     ## 🧪  Run bats tests for git tooling (tests/ba
 	@echo "🧪  Running bats tests for git tooling (tests/bash)..."
 	@bats tests/bash/ && echo "✅  bats tests passed!" || { echo "❌  bats tests failed!"; exit 1; }
 
-test-mcp-rbac: uv  ## RBAC + multi-transport MCP protocol tests (needs live gateway + SSE)
-	@echo "🔐 Running RBAC + multi-transport MCP protocol tests against $${MCP_CLI_BASE_URL:-http://localhost:8080}..."
-	@echo "   Requires: docker-compose stack with SSE gateway registered"
-	@$(UV_BIN) run playwright install --with-deps chromium >/dev/null
-	@$(UV_BIN) run pytest -p playwright tests/live_gateway/mcp/test_mcp_rbac_transport.py -v -s --tb=short \
-		|| { echo "❌ MCP RBAC transport tests failed!"; exit 1; }
-	@echo "✅ MCP RBAC transport tests passed!"
+# deprecated: test-mcp-rbac - Use "make test-e2e" instead (v1.3.0)
+test-mcp-rbac: test-e2e
+	$(call deprecated_target,test-mcp-rbac,make test-e2e,1.3.0)
 
 test-mcp-access-matrix: uv  ## Detailed Rust MCP role/access matrix test with strong tool/resource/prompt sentinels
 	@echo "🧪 Running MCP role/access matrix tests against $${MCP_CLI_BASE_URL:-http://localhost:8080}..."
@@ -997,6 +994,13 @@ test-mcp-session-isolation: uv  ## MCP session/auth isolation tests for the Rust
 	@$(UV_BIN) run pytest tests/live_gateway/e2e_rust/test_mcp_session_isolation.py -v -s --tb=short \
 		|| { echo "❌ MCP session/auth isolation tests failed!"; exit 1; }
 	@echo "✅ MCP session/auth isolation tests passed!"
+
+test-oauth-status-live: uv  ## Black-box test for GET /oauth/status[/{id}] against a running gateway + its Postgres
+	@echo "🧪 Running OAuth status endpoint live tests against $${MCP_CLI_BASE_URL:-http://localhost:8080}..."
+	@echo "   Requires: docker-compose stack (postgres exposed on localhost:5433, the default)"
+	@$(UV_BIN) run pytest tests/live_gateway/mcp/test_oauth_status_live.py -v -s --tb=short \
+		|| { echo "❌ OAuth status live tests failed!"; exit 1; }
+	@echo "✅ OAuth status live tests passed!"
 
 test-e2e-sso: uv  ## E2E tests requiring a live Keycloak SSO identity provider
 	@echo "🔐 Running SSO-dependent E2E tests against $${MCP_CLI_BASE_URL:-http://localhost:8080}..."
