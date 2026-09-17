@@ -33,7 +33,7 @@ import asyncio
 from collections.abc import AsyncIterator
 import concurrent.futures
 from contextlib import asynccontextmanager, suppress
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -52,7 +52,7 @@ from mcp.types import InitializeResult
 import pytest
 
 pw = pytest.importorskip("playwright", reason="playwright is not installed – pip install playwright")
-from playwright.sync_api import APIRequestContext, APIResponse, Playwright
+from playwright.sync_api import APIRequestContext, APIResponse, Error as PlaywrightError, Playwright
 
 # Local
 from mcpgateway.services.mcp_apps import MCP_UI_EXTENSION
@@ -630,6 +630,12 @@ _JWT_SECRET = os.getenv("JWT_SECRET_KEY", "my-test-key-but-now-longer-than-32-by
 # The default covers one 60-second publish interval plus 15 seconds of slack.
 _PER_SERVER_ACCESS_SYNC_DEADLINE_SECONDS = float(os.getenv("MCP_E2E_PUBLISHER_SYNC_DEADLINE", "75.0"))
 _PER_SERVER_ACCESS_RETRY_DELAY_SECONDS = 1.0
+# Replica propagation via Nginx is expected to be faster than the 60-second
+# tool-catalog publish interval that _PER_SERVER_ACCESS_SYNC_DEADLINE_SECONDS covers.
+_REPLICA_SYNC_DEADLINE_SECONDS = float(os.getenv("MCP_E2E_REPLICA_SYNC_DEADLINE", "30.0"))
+# Revocation invalidates the Redis auth cache and publishes to the other replicas.
+# One second matches TestDenyPaths.test_revoked_token_fails. Raise it under CI load.
+_REVOCATION_PROPAGATION_SECONDS = float(os.getenv("MCP_E2E_REVOCATION_DELAY", "1.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +649,27 @@ def _api_context(playwright: Playwright, token: str) -> APIRequestContext:
     return make_playwright_api_context(playwright, BASE_URL, token)
 
 
+def _replica_tools_path(gateway_id: str, probe: str) -> str:
+    """Build a unique, unpaginated gateway-tool request for a replica probe."""
+    return f"/tools?limit=0&gateway_id={gateway_id}&replica_probe={probe}"
+
+
+def _assert_replica_response(response, read_index: int) -> list[dict[str, Any]]:
+    """Assert a successful backend response that was not served from Nginx cache."""
+    assert response.status == 200, f"Replica read {read_index} failed: {response.status} {response.text()}"
+    cache_status = response.headers.get("x-cache-status")
+    assert cache_status != "HIT", f"Replica read {read_index} was served from Nginx cache, not a gateway backend"
+    payload = response.json()
+    assert isinstance(payload, list), f"Replica read {read_index} returned unexpected payload: {payload!r}"
+    return payload
+
+
+def _get_gateway_tools(admin_api: APIRequestContext, gateway_id: str, probe: str, read_index: int) -> list[dict[str, Any]]:
+    """Read all tools for one gateway through Nginx using a unique cache key."""
+    response = admin_api.get(_replica_tools_path(gateway_id, probe))
+    return _assert_replica_response(response, read_index)
+
+
 # ---------------------------------------------------------------------------
 # RBAC helper: resolve role name -> UUID
 # ---------------------------------------------------------------------------
@@ -653,6 +680,61 @@ def _resolve_role_id(admin_api: APIRequestContext, role_name: str) -> str:
         if role.get("name") == role_name:
             return role["id"]
     raise AssertionError(f"RBAC role '{role_name}' not found. Available: {[r.get('name') for r in resp.json()]}")
+
+
+# ---------------------------------------------------------------------------
+# Token minting: POST /tokens as the token's own owner
+# ---------------------------------------------------------------------------
+def _mint_token(
+    playwright: Playwright,
+    email: str,
+    *,
+    is_admin: bool = False,
+    team_id: str | None = None,
+    scope: dict[str, Any] | None = None,
+    expires_in_days: int = 1,
+) -> dict[str, Any]:
+    """Mint an API token for ``email`` through ``POST /tokens``.
+
+    The call runs as the token's own owner. A short-lived JWT for ``email``
+    authenticates a throwaway API context, so the created token is self-owned
+    rather than admin-delegated.
+
+    Args:
+        playwright: Playwright entry point used to build the API context.
+        email: Owner of the new token.
+        is_admin: Set the ``is_admin`` claim on the minting JWT.
+        team_id: Scope the token to this team. Omit for a personal token.
+        scope: Token scope payload, for example ``{"permissions": ["tools.read"]}``.
+        expires_in_days: Token lifetime in days.
+
+    Returns:
+        dict: Keys ``access_token``, ``token_id``, ``token_name``.
+    """
+    user_jwt = _make_jwt(email, is_admin=is_admin, teams=[team_id] if team_id else None)
+    user_ctx = _api_context(playwright, user_jwt)
+    token_name = f"{RBAC_PREFIX}-token-{uuid.uuid4().hex[:8]}"
+    token_data: dict[str, Any] = {
+        "name": token_name,
+        "expires_in_days": expires_in_days,
+    }
+    if team_id:
+        token_data["team_id"] = team_id
+    if scope:
+        token_data["scope"] = scope
+
+    try:
+        token_resp = user_ctx.post("/tokens", data=token_data)
+        assert token_resp.status in (200, 201), f"Failed to create token for {email}: {token_resp.status} {token_resp.text()}"
+        payload = token_resp.json()
+        access_token = payload["access_token"]
+        token_obj = payload.get("token", payload)
+        token_id = token_obj.get("id") or token_obj.get("token_id")
+    finally:
+        user_ctx.dispose()
+
+    logger.info("Created API token for %s (id=%s)", email, token_id)
+    return {"access_token": access_token, "token_id": token_id, "token_name": token_name}
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +752,7 @@ def _create_user_with_token(
 ) -> dict[str, Any]:
     """Create a user via API, optionally join a team, assign RBAC role, and create an API token.
 
-    Returns dict with: email, access_token, token_id, team_id, role.
+    Returns dict with: email, access_token, token_id, token_name, team_id, role, is_admin.
     """
     # 1. Create user
     resp = admin_api.post(
@@ -704,36 +786,14 @@ def _create_user_with_token(
             assert role_resp.status in (200, 201), f"Failed to assign {rbac_role} to {email}: {role_resp.status} {role_resp.text()}"
         logger.info("Assigned %s role to %s", rbac_role, email)
 
-    # 4. Create API token via POST /tokens (as the user, using admin JWT that impersonates)
-    # We use a JWT for this user to create a self-owned token
-    user_jwt = _make_jwt(email, is_admin=is_admin, teams=[team_id] if team_id else None)
-    user_ctx = _api_context(playwright, user_jwt)
-    token_name = f"{RBAC_PREFIX}-token-{uuid.uuid4().hex[:8]}"
-    token_data: dict[str, Any] = {
-        "name": token_name,
-        "expires_in_days": 1,
-    }
-    if team_id:
-        token_data["team_id"] = team_id
-    if token_scope:
-        token_data["scope"] = token_scope
-
-    try:
-        token_resp = user_ctx.post("/tokens", data=token_data)
-        assert token_resp.status in (200, 201), f"Failed to create token for {email}: {token_resp.status} {token_resp.text()}"
-        payload = token_resp.json()
-        access_token = payload["access_token"]
-        token_obj = payload.get("token", payload)
-        token_id = token_obj.get("id") or token_obj.get("token_id")
-    finally:
-        user_ctx.dispose()
-
-    logger.info("Created API token for %s (id=%s)", email, token_id)
+    # 4. Create API token via POST /tokens, acting as the user
+    minted = _mint_token(playwright, email, is_admin=is_admin, team_id=team_id, scope=token_scope)
 
     return {
         "email": email,
-        "access_token": access_token,
-        "token_id": token_id,
+        "access_token": minted["access_token"],
+        "token_id": minted["token_id"],
+        "token_name": minted["token_name"],
         "team_id": team_id,
         "role": rbac_role,
         "is_admin": is_admin,
@@ -786,7 +846,7 @@ def rbac_team(admin_api: APIRequestContext) -> Generator[dict[str, Any], None, N
 
 @pytest.fixture(scope="module")
 def streamable_http_gateway(admin_api: APIRequestContext) -> Generator[dict[str, Any], None, None]:
-    """Register fast_time_server via Streamable HTTP transport and wait for tool sync."""
+    """Register fast_time_server and wait for a stable Streamable HTTP tool catalog."""
     streamable_http_url = "http://fast_time_server:9080/mcp"
 
     # Delete any pre-existing gateway with same name or same URL (gateway_service
@@ -802,51 +862,75 @@ def streamable_http_gateway(admin_api: APIRequestContext) -> Generator[dict[str,
                 displaced_gateways.append(gw)
                 admin_api.delete(f"/gateways/{gw['id']}")
 
-    resp = admin_api.post(
-        "/gateways",
-        data={
-            "name": STREAMABLE_HTTP_GATEWAY_NAME,
-            "url": streamable_http_url,
-            "transport": "STREAMABLEHTTP",
-        },
-    )
-    assert resp.status in (200, 201), f"Failed to register Streamable HTTP gateway: {resp.status} {resp.text()}"
-    gw = resp.json()
-    gw_id = gw["id"]
-    logger.info("Registered Streamable HTTP gateway: %s (id=%s)", STREAMABLE_HTTP_GATEWAY_NAME, gw_id)
+    gw_id: str | None = None
+    try:
+        resp = admin_api.post(
+            "/gateways",
+            data={
+                "name": STREAMABLE_HTTP_GATEWAY_NAME,
+                "url": streamable_http_url,
+                "transport": "STREAMABLEHTTP",
+            },
+        )
+        assert resp.status in (200, 201), f"Failed to register Streamable HTTP gateway: {resp.status} {resp.text()}"
+        gw = resp.json()
+        gw_id = gw["id"]
+        logger.info("Registered Streamable HTTP gateway: %s (id=%s)", STREAMABLE_HTTP_GATEWAY_NAME, gw_id)
 
-    # Poll for tool sync (up to 30s)
-    for i in range(30):
+        deadline = time.monotonic() + _REPLICA_SYNC_DEADLINE_SECONDS
+        previous_tool_ids: frozenset[str] | None = None
+        read_index = 0
+        while time.monotonic() < deadline:
+            read_index += 1
+            probe = f"gateway-sync-{uuid.uuid4().hex}"
+            try:
+                gateway_tools = _get_gateway_tools(admin_api, gw_id, probe, read_index)
+                tool_ids = frozenset(str(tool["id"]) for tool in gateway_tools)
+                if tool_ids and tool_ids == previous_tool_ids:
+                    logger.info("Streamable HTTP gateway synchronized with %d stable tools", len(tool_ids))
+                    yield {"id": gw_id, "name": STREAMABLE_HTTP_GATEWAY_NAME, "tool_ids": tool_ids}
+                    return
+                previous_tool_ids = tool_ids
+            except (AssertionError, KeyError, TypeError, ValueError, PlaywrightError) as exc:
+                logger.debug("Gateway tool synchronization probe %d did not succeed: %s", read_index, exc)
+                previous_tool_ids = None
+            time.sleep(_PER_SERVER_ACCESS_RETRY_DELAY_SECONDS)
+
+        raise AssertionError(f"Streamable HTTP gateway {gw_id} did not produce a stable tool catalog within {_REPLICA_SYNC_DEADLINE_SECONDS}s")
+    finally:
+        if gw_id:
+            with suppress(Exception):
+                delete_response = admin_api.delete(f"/gateways/{gw_id}")
+                if delete_response.status not in (200, 204, 404):
+                    logger.warning("Failed to delete Streamable HTTP gateway %s: %s %s", gw_id, delete_response.status, delete_response.text())
+
+        # Restore any displaced pre-existing registration (e.g. the compose-seeded
+        # "fast_time" gateway) so other tests relying on it keep working.
+        for gw in displaced_gateways:
+            with suppress(Exception):
+                admin_api.post(
+                    "/gateways",
+                    data={
+                        "name": gw["name"],
+                        "url": gw["url"],
+                        "transport": gw.get("transport", "STREAMABLEHTTP"),
+                        "description": gw.get("description"),
+                    },
+                )
+
+
+@pytest.fixture(scope="module")
+def cross_replica_user(admin_api: APIRequestContext, playwright: Playwright, streamable_http_gateway: dict[str, Any]) -> Generator[dict[str, Any], None, None]:
+    """Create a token-owning user for replica consistency checks and always clean it up."""
+    del streamable_http_gateway
+    email = f"{RBAC_PREFIX}-replica-{uuid.uuid4().hex[:8]}@test.com"
+    user_info: dict[str, Any] = {"email": email, "team_id": None, "role": None, "token_id": None}
+    try:
+        user_info.update(_create_user_with_token(admin_api, playwright, email))
         time.sleep(1)
-        try:
-            tools = admin_api.get("/tools").json()
-            gateway_tools = [t for t in tools if t.get("gatewayId") == gw_id]
-            if gateway_tools:
-                logger.info("Streamable HTTP gateway synced: %d tools", len(gateway_tools))
-                break
-        except Exception:
-            pass
-    else:
-        logger.warning("Streamable HTTP gateway tool sync timed out, continuing anyway")
-
-    yield {"id": gw_id, "name": STREAMABLE_HTTP_GATEWAY_NAME}
-
-    with suppress(Exception):
-        admin_api.delete(f"/gateways/{gw_id}")
-
-    # Restore any displaced pre-existing registration (e.g. the compose-seeded
-    # "fast_time" gateway) so other tests relying on it keep working.
-    for gw in displaced_gateways:
-        with suppress(Exception):
-            admin_api.post(
-                "/gateways",
-                data={
-                    "name": gw["name"],
-                    "url": gw["url"],
-                    "transport": gw.get("transport", "STREAMABLEHTTP"),
-                    "description": gw.get("description"),
-                },
-            )
+        yield user_info
+    finally:
+        _cleanup_user(admin_api, user_info)
 
 
 @pytest.fixture(scope="module")
@@ -990,6 +1074,25 @@ def scoped_token_read_execute(admin_api: APIRequestContext, playwright: Playwrig
     _cleanup_user(admin_api, user)
 
 
+@pytest.fixture(scope="module")
+def token_lifecycle_user(admin_api: APIRequestContext, playwright: Playwright) -> Generator[dict[str, Any], None, None]:
+    """An admin user whose first token survives the whole token-lifecycle class.
+
+    Tests that do not destroy the token share this one. Tests that revoke or
+    restrict a token mint their own against the same user.
+    """
+    uid = uuid.uuid4().hex[:8]
+    user = _create_user_with_token(
+        admin_api,
+        playwright,
+        f"{RBAC_PREFIX}-tokenlc-{uid}@test.com",
+        is_admin=True,
+        rbac_role="platform_admin",
+    )
+    yield user
+    _cleanup_user(admin_api, user)
+
+
 # ---------------------------------------------------------------------------
 # MCP protocol helpers
 # ---------------------------------------------------------------------------
@@ -1003,6 +1106,26 @@ def _run_async(coro):
 
 def _mcp_client_url(server_url: str = BASE_URL) -> str:
     return f"{server_url}/mcp/" if not server_url.endswith(("/mcp", "/mcp/")) else server_url.rstrip("/") + "/"
+
+
+def _unwrap_exception_group(exc: BaseException) -> list[BaseException]:
+    """Flatten a possibly-nested ``ExceptionGroup`` into its leaf exceptions.
+
+    The MCP SDK runs client calls inside anyio ``TaskGroup``s at both the
+    session and transport layers. A single underlying error (an ``McpError``,
+    an ``httpx.HTTPStatusError``) can arrive wrapped in one or more
+    ``ExceptionGroup`` layers depending on how many task groups were open on
+    the call stack when it surfaced -- for example ``initialize()`` alone
+    wraps once, while ``initialize()`` followed by ``call_tool()`` on the same
+    session wraps twice. Callers that need to inspect the real error must
+    unwrap to an unknown, not a fixed, depth.
+    """
+    if isinstance(exc, ExceptionGroup):
+        leaves: list[BaseException] = []
+        for sub in exc.exceptions:
+            leaves.extend(_unwrap_exception_group(sub))
+        return leaves
+    return [exc]
 
 
 @asynccontextmanager
@@ -1496,6 +1619,210 @@ class TestDenyPaths:
         with pytest.raises(Exception) as excinfo:
             _run_async(_async_mcp_connect(_mcp_client_url(), access_token="not-bearer-prefixed-garbage"))
         print(f"    -> Invalid token: failure (expected): {excinfo.value}")
+
+
+# ---------------------------------------------------------------------------
+# Test: API token lifecycle
+# ---------------------------------------------------------------------------
+class TestTokenLifecycle:
+    """Create, list, authenticate, revoke, and scope-restrict an API token.
+
+    Issue #6523. Token revocation already has a deny-path test. Everything
+    before revocation was fixture infrastructure until this class. A silent
+    break in the token catalog would leave the RBAC suite green.
+    """
+
+    def test_create_token_returns_access_token_and_id(self, token_lifecycle_user: dict, admin_api: APIRequestContext, playwright: Playwright) -> None:
+        """POST /tokens returns a non-empty access_token and a token id.
+
+        The POST runs inline rather than through ``_mint_token`` so the raw
+        ``TokenCreateResponse`` body is asserted, not the helper's extraction.
+        """
+        user_jwt = _make_jwt(token_lifecycle_user["email"], is_admin=True, teams=None)
+        ctx = _api_context(playwright, user_jwt)
+        token_id = None
+        try:
+            name = f"{RBAC_PREFIX}-token-{uuid.uuid4().hex[:8]}"
+            resp = ctx.post("/tokens", data={"name": name, "expires_in_days": 1})
+            assert resp.status in (200, 201), f"POST /tokens failed: {resp.status} {resp.text()}"
+
+            payload = resp.json()
+            token_obj = payload.get("token", {})
+            token_id = token_obj.get("id")
+            assert "access_token" in payload, f"TokenCreateResponse must carry access_token, got {sorted(payload)}"
+            assert "token" in payload, f"TokenCreateResponse must carry a token object, got {sorted(payload)}"
+            assert isinstance(payload["access_token"], str), f"access_token must be a string, got {type(payload['access_token'])}"
+            assert payload["access_token"], "access_token must not be empty"
+            assert token_id, f"token object must carry an id, got {sorted(token_obj)}"
+            assert token_obj["name"] == name, f"Name mismatch: {token_obj['name']} != {name}"
+            assert isinstance(payload.get("warnings", []), list), "warnings must be a list when present"
+            print(f"    -> Minted token {token_id} ({len(payload['access_token'])} chars, warnings={payload.get('warnings')})")
+        finally:
+            ctx.dispose()
+            if token_id:
+                with suppress(Exception):
+                    admin_api.delete(f"/tokens/admin/{token_id}")
+
+    def test_created_token_in_list(self, token_lifecycle_user: dict, playwright: Playwright) -> None:
+        """GET /tokens lists the caller's token by id and name.
+
+        ``/tokens`` blocks the ``api_token`` auth method outright
+        (``mcpgateway/routers/tokens.py`` ``_require_authenticated_session`` —
+        Management Plane isolation against token-chaining). List with a fresh
+        session-style JWT for the same user, not the minted access_token.
+        """
+        user_jwt = _make_jwt(token_lifecycle_user["email"], is_admin=True, teams=None)
+        ctx = _api_context(playwright, user_jwt)
+        try:
+            resp = ctx.get("/tokens")
+            assert resp.status == 200, f"GET /tokens failed: {resp.status} {resp.text()}"
+            payload = resp.json()
+            assert "tokens" in payload, f"TokenListResponse must carry a 'tokens' key, got {sorted(payload)}"
+            by_id = {token["id"]: token for token in payload["tokens"]}
+            assert token_lifecycle_user["token_id"] in by_id, f"Created token missing from catalog. Listed ids: {sorted(by_id)}"
+            listed = by_id[token_lifecycle_user["token_id"]]
+            assert listed["name"] == token_lifecycle_user["token_name"], f"Name mismatch: {listed['name']} != {token_lifecycle_user['token_name']}"
+            print(f"    -> Catalog lists {listed['name']} (total={payload['total']})")
+        finally:
+            ctx.dispose()
+
+    def test_token_authenticates_rest_endpoint(self, token_lifecycle_user: dict, playwright: Playwright) -> None:
+        """The minted token authenticates a REST endpoint."""
+        ctx = _api_context(playwright, token_lifecycle_user["access_token"])
+        try:
+            resp = ctx.get("/tools")
+            assert resp.status == 200, f"GET /tools with a valid token must return 200: {resp.status} {resp.text()}"
+            print(f"    -> REST auth accepted on GET /tools: {resp.status}")
+        finally:
+            ctx.dispose()
+
+    def test_token_authenticates_mcp_endpoint(self, token_lifecycle_user: dict) -> None:
+        """The minted token opens an MCP session."""
+        assert _mcp_initialize_only(token_lifecycle_user["access_token"]), "MCP initialize must succeed with a valid token"
+        print("    -> MCP initialize accepted the minted token")
+
+    def test_expires_at_reflects_expires_in_days(self, token_lifecycle_user: dict, admin_api: APIRequestContext, playwright: Playwright) -> None:
+        """A one-day token expires about 24 hours from now.
+
+        List with a fresh session-style JWT, not the minted access_token —
+        see ``test_created_token_in_list`` for why ``/tokens`` rejects it.
+        """
+        minted = _mint_token(playwright, token_lifecycle_user["email"], is_admin=True, expires_in_days=1)
+        user_jwt = _make_jwt(token_lifecycle_user["email"], is_admin=True, teams=None)
+        ctx = _api_context(playwright, user_jwt)
+        try:
+            resp = ctx.get("/tokens")
+            assert resp.status == 200, f"GET /tokens failed: {resp.status} {resp.text()}"
+            by_id = {token["id"]: token for token in resp.json()["tokens"]}
+            assert minted["token_id"] in by_id, f"Minted token missing from catalog. Listed ids: {sorted(by_id)}"
+            raw = by_id[minted["token_id"]]["expires_at"]
+            assert raw, "expires_in_days=1 must produce a non-null expires_at"
+
+            expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            expected = datetime.now(timezone.utc) + timedelta(days=1)
+            drift = abs((expires_at - expected).total_seconds())
+            assert drift <= 120, f"expires_at {expires_at.isoformat()} drifts {drift:.0f}s from now+24h"
+            print(f"    -> expires_at {expires_at.isoformat()} ({drift:.0f}s drift)")
+        finally:
+            ctx.dispose()
+            with suppress(Exception):
+                admin_api.delete(f"/tokens/admin/{minted['token_id']}")
+
+    def test_revoke_token_denies_rest(self, token_lifecycle_user: dict, admin_api: APIRequestContext, playwright: Playwright) -> None:
+        """A revoked token is rejected on the REST API."""
+        minted = _mint_token(playwright, token_lifecycle_user["email"], is_admin=True)
+        ctx = _api_context(playwright, minted["access_token"])
+        try:
+            before = ctx.get("/tools")
+            assert before.status == 200, f"Token must work before revocation: {before.status} {before.text()}"
+
+            revoke = admin_api.delete(f"/tokens/admin/{minted['token_id']}")
+            assert revoke.status == 204, f"Revoke must return 204: {revoke.status} {revoke.text()}"
+            time.sleep(_REVOCATION_PROPAGATION_SECONDS)
+
+            after = ctx.get("/tools")
+            assert after.status == 401, f"Revoked token must be rejected with 401, got {after.status}: {after.text()}"
+            print(f"    -> Revoked token rejected on REST: {after.status}")
+        finally:
+            ctx.dispose()
+            with suppress(Exception):
+                admin_api.delete(f"/tokens/admin/{minted['token_id']}")
+
+    def test_revoke_token_denies_mcp(self, token_lifecycle_user: dict, admin_api: APIRequestContext, playwright: Playwright) -> None:
+        """A revoked token cannot open an MCP session."""
+        minted = _mint_token(playwright, token_lifecycle_user["email"], is_admin=True)
+        try:
+            assert _mcp_initialize_only(minted["access_token"]), "Token must work before revocation"
+
+            revoke = admin_api.delete(f"/tokens/admin/{minted['token_id']}")
+            assert revoke.status == 204, f"Revoke must return 204: {revoke.status} {revoke.text()}"
+            time.sleep(_REVOCATION_PROPAGATION_SECONDS)
+
+            # A revoked token fails the JWT auth dependency before any MCP method
+            # dispatch, so the SDK surfaces it as a raw httpx.HTTPStatusError from
+            # the initialize POST -- wrapped in one or more ExceptionGroup layers
+            # because the SDK runs that POST inside anyio TaskGroups (see
+            # _unwrap_exception_group). Narrowed to these two types and to status
+            # 401 so an unrelated transport failure (a restart, a timeout) cannot
+            # read as "revocation confirmed".
+            with pytest.raises((httpx.HTTPStatusError, ExceptionGroup)) as excinfo:
+                _mcp_initialize_only(minted["access_token"])
+            status_errors = [e for e in _unwrap_exception_group(excinfo.value) if isinstance(e, httpx.HTTPStatusError)]
+            assert status_errors and status_errors[0].response.status_code == 401, f"expected a 401 from the revoked token, got: {excinfo.value!r}"
+            print(f"    -> Revoked token rejected on MCP (expected): {status_errors[0]}")
+        finally:
+            with suppress(Exception):
+                admin_api.delete(f"/tokens/admin/{minted['token_id']}")
+
+    def test_scoped_token_denied_tool_execute(self, token_lifecycle_user: dict, admin_api: APIRequestContext, playwright: Playwright, streamable_http_gateway: dict) -> None:
+        """A token scoped to tools.read cannot execute a tool.
+
+        Token generation auto-injects ``servers.use`` for MCP-method
+        permissions, so the token reaches the transport. ``token_scope_grants``
+        then denies ``tools.execute`` at the JSON-RPC layer.
+        """
+        minted = _mint_token(
+            playwright,
+            token_lifecycle_user["email"],
+            is_admin=True,
+            scope={"permissions": ["tools.read"]},
+        )
+        try:
+            tools = _mcp_tools_list(minted["access_token"])
+            assert tools, "tools.read must still list tools"
+            assert any(t.name == f"{STREAMABLE_HTTP_GATEWAY_NAME}-get-system-time" for t in tools), f"target tool missing from tools/list: {[t.name for t in tools]}"
+
+            # The except clause lists transport errors only. Catching bare Exception
+            # here would swallow the AssertionError below and the test could never fail.
+            # ExceptionGroup is included because the SDK's ClientSession runs call_tool()
+            # inside an anyio TaskGroup, which wraps a single McpError in an ExceptionGroup
+            # on the way out. This is still safe: the assert below sits outside this try,
+            # so widening the tuple here cannot swallow it.
+            #
+            # The inner assert checks *why* the call failed, not just that it did: an
+            # unrelated transport hiccup (a restart, a timeout) would otherwise also
+            # land in this except and print as "(expected)". "Access denied" is
+            # _ACCESS_DENIED_MSG in mcpgateway/middleware/rbac.py, the fixed message
+            # _ensure_rpc_permission() raises via JSONRPCError(-32003, ...) on a
+            # token_scope_grants() denial -- the one thing this except is meant to catch.
+            # _unwrap_exception_group handles the nesting depth varying by call shape
+            # (a preceding tools/list on the same session adds a task-group layer).
+            result = None
+            try:
+                result = _mcp_tool_call(minted["access_token"], f"{STREAMABLE_HTTP_GATEWAY_NAME}-get-system-time", {"timezone": "UTC"})
+            except (McpError, httpx.HTTPError, RuntimeError, TimeoutError, ExceptionGroup) as exc:
+                leaves = _unwrap_exception_group(exc)
+                assert any("access denied" in str(leaf).lower() for leaf in leaves), f"expected an access-denial error, got: {leaves!r}"
+                print(f"    -> Scoped token denied execute at the transport (expected): {leaves[0]}")
+
+            if result is not None:
+                assert result.isError, f"tools.read-only token must be denied tools.execute, got: {result}"
+                print(f"    -> Scoped token denied execute (expected): {result.content[0].text}")
+        finally:
+            with suppress(Exception):
+                admin_api.delete(f"/tokens/admin/{minted['token_id']}")
 
 
 # ---------------------------------------------------------------------------
@@ -2376,3 +2703,58 @@ class TestUserLifecycle:
         assert deleted.status in (200, 204), f"DELETE /auth/email/admin/users/{email} returned {deleted.status}: {deleted.text()[:500]}"
 
         assert email not in {user.get("email") for user in _list_all_users(admin_api)}, f"{email} is still present in the listing after deletion"
+
+
+# ---------------------------------------------------------------------------
+# Test: Cross-replica consistency
+# ---------------------------------------------------------------------------
+class TestCrossReplicaConsistency:
+    """Writes through Nginx are visible across the three default gateway replicas.
+
+    Ten independent reads have a roughly 99.9949% probability of reaching at
+    least two replicas when Nginx distributes requests uniformly.
+    """
+
+    N_READS = 10
+
+    def test_tool_visible_across_replicas(self, admin_api: APIRequestContext, streamable_http_gateway: dict[str, Any]) -> None:
+        """Every replica probe sees at least one synchronized tool for the new gateway."""
+        gateway_id = streamable_http_gateway["id"]
+
+        for read_index in range(1, self.N_READS + 1):
+            tools = _get_gateway_tools(admin_api, gateway_id, f"tool-visible-{uuid.uuid4().hex}", read_index)
+            assert tools, f"Replica read {read_index} did not return tools for gateway {gateway_id}"
+            assert all(tool.get("gatewayId") == gateway_id for tool in tools), f"Replica read {read_index} returned a tool for another gateway"
+
+    def test_token_authenticates_across_replicas(self, playwright: Playwright, cross_replica_user: dict[str, Any], streamable_http_gateway: dict[str, Any]) -> None:
+        """A token minted through Nginx authenticates every subsequent replica probe."""
+        gateway_id = streamable_http_gateway["id"]
+        user_api = _api_context(playwright, cross_replica_user["access_token"])
+        try:
+            for read_index in range(1, self.N_READS + 1):
+                response = user_api.get(_replica_tools_path(gateway_id, f"token-auth-{uuid.uuid4().hex}"))
+                _assert_replica_response(response, read_index)
+        finally:
+            user_api.dispose()
+
+    def test_user_visible_across_replicas(self, admin_api: APIRequestContext, cross_replica_user: dict[str, Any]) -> None:
+        """A user created through Nginx appears in every subsequent admin listing."""
+        email = cross_replica_user["email"]
+
+        for read_index in range(1, self.N_READS + 1):
+            response = admin_api.get(f"/auth/email/admin/users?limit=0&replica_probe=user-visible-{uuid.uuid4().hex}")
+            users = _assert_replica_response(response, read_index)
+            assert any(user.get("email") == email for user in users), f"Replica read {read_index} did not return user {email}"
+
+    def test_gateway_tools_consistent_across_replicas(self, admin_api: APIRequestContext, streamable_http_gateway: dict[str, Any]) -> None:
+        """Every replica returns the same stable tool catalog and gateway ID."""
+        gateway_id = streamable_http_gateway["id"]
+        expected_tool_ids = streamable_http_gateway["tool_ids"]
+        assert expected_tool_ids, "Gateway fixture did not capture a stable, non-empty tool catalog"
+
+        for read_index in range(1, self.N_READS + 1):
+            tools = _get_gateway_tools(admin_api, gateway_id, f"catalog-consistency-{uuid.uuid4().hex}", read_index)
+            assert all(tool.get("gatewayId") == gateway_id for tool in tools), f"Replica read {read_index} returned a tool for another gateway"
+            actual_tool_ids = frozenset(str(tool["id"]) for tool in tools)
+            assert actual_tool_ids == expected_tool_ids, f"Replica read {read_index} returned tool IDs {sorted(actual_tool_ids)}, expected {sorted(expected_tool_ids)}"
+            assert len(tools) == len(expected_tool_ids), f"Replica read {read_index} returned duplicate tools for gateway {gateway_id}"
