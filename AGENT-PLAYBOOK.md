@@ -34,6 +34,7 @@
 - 本地网关：`docker compose --env-file .env.aliyun.local -f docker-compose.aliyun.yml up -d`，端口 **4447**
   - 容器名 `mcp-hub-gateway`；换镜像时先 `docker rm -f mcp-hub-gateway` 再 up（compose 项目标签不一致，直接 up 会重名冲突）
 - 依赖容器：Postgres `mcp-context-forge-postgres-1`（宿主 5433，库 mcp_e2e）、Redis `mcp-hub-redis`（6380）
+  - 两个容器已设 `--restart unless-stopped`（2026-09-22 起）。若发现它们 Exited，`docker start` 两个即可——网关启动会卡在 redis_isready/db_isready 探测上，症状是容器一直 starting、health 000
 - 敏感文件（**永不提交**）：`.env.aliyun.local`（DATABASE_URL/JWT_SECRET_KEY/IMAGE_TAG/DEFAULT_USER_PASSWORD 等）、`.deploy-credentials.txt`
 - macOS 本机 venv 装不了 psycopg-c（无 libpq），**导入冒烟必须覆盖** `DATABASE_URL="sqlite:///./mcp.db"`
 
