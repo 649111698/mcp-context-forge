@@ -47,10 +47,9 @@ import uuid
 
 # Third-Party
 import httpx
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-from mcp.shared.exceptions import McpError
-from mcp.types import InitializeResult
+import httpx2
+from mcp import ClientSession, MCPError as McpError
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 import pytest
 
 pw = pytest.importorskip("playwright", reason="playwright is not installed – pip install playwright")
@@ -58,6 +57,7 @@ from playwright.sync_api import APIRequestContext, APIResponse, Error as Playwri
 
 # Local
 from mcpgateway.services.mcp_apps import MCP_UI_EXTENSION
+from mcpgateway.utils.streamable_http_compat import ErrorResponseHook
 
 # Local
 from tests.helpers.api_helpers import ApiTestHelper
@@ -115,23 +115,12 @@ skip_no_mcp_apps = pytest.mark.skipif(
 )
 
 
-class GatewayClientSession(ClientSession):
-    """``ClientSession`` that retains the ``InitializeResult`` for assertions."""
-
-    initialize_result: InitializeResult
-
-    async def initialize(self) -> InitializeResult:
-        """Initialize the session and stash the result on the instance."""
-        self.initialize_result = await super().initialize()
-        return self.initialize_result
-
-
 @pytest.fixture
 async def client(jwt_token: str, mcp_url: str):
-    timeout = timedelta(seconds=_CLIENT_TIMEOUT)
+    timeout = httpx2.Timeout(_CLIENT_TIMEOUT)
     headers = {"Authorization": f"Bearer {jwt_token}"}
 
-    # anyio task groups (inside streamablehttp_client / ClientSession) must be
+    # anyio task groups (inside streamable_http_client / ClientSession) must be
     # entered and exited from the same task. pytest-asyncio drives async-gen
     # fixture setup and teardown in separate tasks, so run the whole session
     # lifecycle in a dedicated runner task and hand the session to the test.
@@ -141,15 +130,13 @@ async def client(jwt_token: str, mcp_url: str):
 
     async def _session_runner() -> None:
         try:
-            async with streamablehttp_client(mcp_url, headers=headers, timeout=timeout, sse_read_timeout=timeout) as (read_stream, write_stream, _):
-                async with GatewayClientSession(read_stream, write_stream, read_timeout_seconds=timeout) as session:
+            async with streamable_http_client(mcp_url, http_client=create_mcp_http_client(headers=headers, timeout=timeout)) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream, read_timeout_seconds=_CLIENT_TIMEOUT) as session:
                     await session.initialize()
                     holder["session"] = session
                     ready.set()
                     await release.wait()
-        except Exception as exc:  # surface connection/init failures in the test
-            # Exception, not BaseException: a cancelled runner must see
-            # CancelledError propagate, not have it stashed as a result.
+        except BaseException as exc:  # surface connection/init failures in the test
             holder["error"] = exc
             ready.set()
 
@@ -186,20 +173,20 @@ async def client(jwt_token: str, mcp_url: str):
 # ---------------------------------------------------------------------------
 class TestConnectivity:
 
-    async def test_ping(self, client: GatewayClientSession) -> None:
+    async def test_ping(self, client: ClientSession) -> None:
         """Ping roundtrips via the live gateway session."""
         await client.send_ping()
         print("    -> ping OK")
 
-    async def test_initialize_reports_server_info(self, client: GatewayClientSession) -> None:
-        """Initialize exposes protocolVersion, capabilities, and serverInfo."""
+    async def test_initialize_reports_server_info(self, client: ClientSession) -> None:
+        """Initialize exposes protocol_version, capabilities, and server_info."""
         init = client.initialize_result
-        assert init.protocolVersion, f"missing protocolVersion: {init}"
+        assert init.protocol_version, f"missing protocolVersion: {init}"
         assert init.capabilities, f"missing capabilities: {init}"
-        assert init.serverInfo, f"missing serverInfo: {init}"
-        print(f"    -> Protocol: {init.protocolVersion}, Server: {init.serverInfo.name} v{init.serverInfo.version}")
+        assert init.server_info, f"missing serverInfo: {init}"
+        print(f"    -> Protocol: {init.protocol_version}, Server: {init.server_info.name} v{init.server_info.version}")
 
-    async def test_server_capabilities_include_core_surfaces(self, client: GatewayClientSession) -> None:
+    async def test_server_capabilities_include_core_surfaces(self, client: ClientSession) -> None:
         """Gateway advertises tools, resources, and prompts capabilities."""
         caps = client.initialize_result.capabilities
         assert caps.tools is not None, f"tools capability missing: {caps}"
@@ -208,7 +195,7 @@ class TestConnectivity:
         advertised = [k for k in ("tools", "resources", "prompts", "logging", "completions") if getattr(caps, k, None) is not None]
         print(f"    -> Capabilities: {advertised}")
 
-    async def test_multiple_calls_in_one_session(self, client: GatewayClientSession) -> None:
+    async def test_multiple_calls_in_one_session(self, client: ClientSession) -> None:
         """A single session supports interleaved tools/resources/prompts calls."""
         tools = (await client.list_tools()).tools
         resources = (await client.list_resources()).resources
@@ -223,29 +210,29 @@ class TestConnectivity:
 # ---------------------------------------------------------------------------
 class TestTools:
 
-    async def test_tools_list_nonempty(self, client: GatewayClientSession) -> None:
+    async def test_tools_list_nonempty(self, client: ClientSession) -> None:
         tools = (await client.list_tools()).tools
         assert len(tools) > 0, "no tools registered on gateway"
         print(f"    -> {len(tools)} tools: {[t.name for t in tools][:10]}")
 
-    async def test_tools_have_required_fields(self, client: GatewayClientSession) -> None:
+    async def test_tools_have_required_fields(self, client: ClientSession) -> None:
         tools = (await client.list_tools()).tools
         for tool in tools:
             assert tool.name, f"tool missing name: {tool}"
             assert tool.description, f"tool {tool.name} missing description"
-            assert tool.inputSchema is not None, f"tool {tool.name} missing inputSchema"
+            assert tool.input_schema is not None, f"tool {tool.name} missing inputSchema"
         print(f"    -> all {len(tools)} tools have name/description/inputSchema")
 
-    async def test_tools_include_gateway_prefixed(self, client: GatewayClientSession) -> None:
+    async def test_tools_include_gateway_prefixed(self, client: ClientSession) -> None:
         """Federated tools surface under a hyphenated ``<server>-<tool>`` name."""
         tools = (await client.list_tools()).tools
         prefixed = [t.name for t in tools if "-" in t.name]
         assert prefixed, f"expected gateway-prefixed tools, got: {[t.name for t in tools]}"
         print(f"    -> {len(prefixed)} gateway-prefixed tools present")
 
-    async def test_tool_input_schemas_are_json_schema_objects(self, client: GatewayClientSession) -> None:
+    async def test_tool_input_schemas_are_json_schema_objects(self, client: ClientSession) -> None:
         for tool in (await client.list_tools()).tools:
-            schema = tool.inputSchema
+            schema = tool.input_schema
             if schema:
                 assert schema.get("type") == "object", f"tool {tool.name} inputSchema not type=object: {schema}"
         print("    -> all tool inputSchemas validated as type=object")
@@ -253,11 +240,11 @@ class TestTools:
 
 class TestDiscovery:
 
-    async def test_resources_list(self, client: GatewayClientSession) -> None:
+    async def test_resources_list(self, client: ClientSession) -> None:
         resources = (await client.list_resources()).resources
         print(f"    -> {len(resources)} resources")
 
-    async def test_resources_read_roundtrip(self, client: GatewayClientSession) -> None:
+    async def test_resources_read_roundtrip(self, client: ClientSession) -> None:
         """Round-trip any advertised resource through resources/read.
 
         Listing without reading is weak coverage — this exercises the full
@@ -291,11 +278,11 @@ class TestDiscovery:
             return
         pytest.skip(f"All {len(resources)} resource(s) returned errors via generic /mcp/ (last: {last_error})")
 
-    async def test_prompts_list(self, client: GatewayClientSession) -> None:
+    async def test_prompts_list(self, client: ClientSession) -> None:
         prompts = (await client.list_prompts()).prompts
         print(f"    -> {len(prompts)} prompts")
 
-    async def test_prompt_get_renders(self, client: GatewayClientSession) -> None:
+    async def test_prompt_get_renders(self, client: ClientSession) -> None:
         """Render any advertised prompt via prompts/get.
 
         Prefers a prompt with no required arguments to avoid hard-coding
@@ -328,37 +315,37 @@ class TestToolCalls:
     (fast_time_server) which may be transiently unavailable.
     """
 
-    async def test_get_system_time(self, client: GatewayClientSession) -> None:
+    async def test_get_system_time(self, client: ClientSession) -> None:
         result = await client.call_tool("fast-time-get-system-time", {"timezone": "UTC"})
-        assert result.isError is False, f"get-system-time returned error (upstream may be down): {result.content}"
+        assert result.is_error is False, f"get-system-time returned error (upstream may be down): {result.content}"
         assert result.content and result.content[0].type == "text"
         text = result.content[0].text
         assert text
         print(f"    -> get-system-time(UTC) = {text}")
 
-    async def test_convert_time(self, client: GatewayClientSession) -> None:
+    async def test_convert_time(self, client: ClientSession) -> None:
         result = await client.call_tool(
             "fast-time-convert-time",
             {"time": "2025-01-15T12:00:00Z", "source_timezone": "UTC", "target_timezone": "America/New_York"},
         )
-        assert result.isError is False, f"convert-time returned error (upstream may be down): {result.content}"
+        assert result.is_error is False, f"convert-time returned error (upstream may be down): {result.content}"
         assert result.content[0].type == "text"
         print(f"    -> convert-time(UTC->NY) = {result.content[0].text}")
 
-    async def test_echo(self, client: GatewayClientSession) -> None:
+    async def test_echo(self, client: ClientSession) -> None:
         test_message = "hello-from-mcp-protocol-e2e"
         result = await client.call_tool("fast-time-echo", {"message": test_message})
-        assert result.isError is False, f"echo returned error (upstream may be down): {result.content}"
+        assert result.is_error is False, f"echo returned error (upstream may be down): {result.content}"
         text = result.content[0].text
         assert test_message in text, f"echo did not return message: {text}"
         print(f"    -> echo('{test_message}') = {text}")
 
-    async def test_get_stats(self, client: GatewayClientSession) -> None:
+    async def test_get_stats(self, client: ClientSession) -> None:
         result = await client.call_tool("fast-time-get-stats", {})
-        assert result.isError is False, f"get-stats returned error (upstream may be down): {result.content}"
+        assert result.is_error is False, f"get-stats returned error (upstream may be down): {result.content}"
         print(f"    -> get-stats = {result.content[0].text[:120]}")
 
-    async def test_schema_error_preserves_payload(self, client: GatewayClientSession) -> None:
+    async def test_schema_error_preserves_payload(self, client: ClientSession) -> None:
         """End-to-end regression guard for ContextForge #4202.
 
         Drives the full MCP federation path through the retained fast-time
@@ -368,27 +355,27 @@ class TestToolCalls:
         tool = await self._require_declared_output_schema(client, "fast-time-schema-error")
         assert tool is not None
         result = await client.call_tool("fast-time-schema-error", {})
-        assert result.isError is True, f"expected isError=true, got: {result}"
+        assert result.is_error is True, f"expected isError=true, got: {result}"
         text = result.content[0].text if result.content else ""
         assert "200 points" in text, f"expected original error text preserved, got: {text!r}"
         assert '"validator"' not in text and '"required"' not in text, f"error payload appears to have been replaced by a validation error: {text!r}"
         print(f"    -> schema_error isError=true preserved: {text}")
 
-    async def test_schema_success_validates_payload(self, client: GatewayClientSession) -> None:
+    async def test_schema_success_validates_payload(self, client: ClientSession) -> None:
         """Positive control proving valid output-schema responses still validate."""
         tool = await self._require_declared_output_schema(client, "fast-time-schema-success")
         assert tool is not None
         result = await client.call_tool("fast-time-schema-success", {})
-        assert result.isError is False, f"expected success, got: {result}"
+        assert result.is_error is False, f"expected success, got: {result}"
         payload = json.loads(result.content[0].text)
         assert payload.get("recognitionId") == "rec-123", f"unexpected payload: {payload}"
-        structured = result.structuredContent
+        structured = result.structured_content
         assert structured is not None, f"expected structured content on successful validation: {result}"
         assert structured.get("recognitionId") == "rec-123", f"unexpected structured content: {structured}"
         print(f"    -> schema_success validated: {payload}")
 
     @staticmethod
-    async def _require_declared_output_schema(client: GatewayClientSession, tool_name: str):
+    async def _require_declared_output_schema(client: ClientSession, tool_name: str):
         """Require a synced tool with a declared output schema."""
         tools = (await client.list_tools()).tools
         match = next((tool for tool in tools if tool.name == tool_name), None)
@@ -396,20 +383,20 @@ class TestToolCalls:
             f"Tool {tool_name!r} is not registered in the gateway. "
             "Check that register_fast_time completed and gateway synchronization finished."
         )
-        assert match.outputSchema, (
-            f"Tool {tool_name!r} has no outputSchema declared in the gateway: {match}. "
+        assert match.output_schema, (
+            f"Tool {tool_name!r} has no output_schema declared in the gateway: {match}. "
             "Check that the upstream tool declares an output_schema and gateway synchronization completed successfully."
         )
         return match
 
-    async def test_nonexistent_tool(self, client: GatewayClientSession) -> None:
+    async def test_nonexistent_tool(self, client: ClientSession) -> None:
         """Calling a nonexistent tool surfaces an error, via either path."""
         try:
             result = await client.call_tool("nonexistent-tool-xyz", {})
         except McpError as exc:
             print(f"    -> McpError (expected): {exc}")
             return
-        assert result.isError is True, f"expected error for non-existent tool: {result}"
+        assert result.is_error is True, f"expected error for non-existent tool: {result}"
         print(f"    -> isError=True (expected): {result.content[0].text[:100] if result.content else ''}")
 
 
@@ -1134,7 +1121,7 @@ def _unwrap_exception_group(exc: BaseException) -> list[BaseException]:
 # Catching bare Exception would swallow the AssertionErrors below and the test could
 # never fail (#6839). ExceptionGroup is included because the SDK's ClientSession runs
 # call_tool() inside an anyio TaskGroup, which wraps a single McpError on the way out.
-_TRANSPORT_ERRORS = (McpError, httpx.HTTPError, RuntimeError, TimeoutError, ExceptionGroup)
+_TRANSPORT_ERRORS = (McpError, httpx.HTTPError, httpx2.HTTPError, RuntimeError, TimeoutError, ExceptionGroup)
 
 # Every RBAC denial in mcpgateway/middleware/rbac.py raises 403. A 401 means
 # authentication failed before RBAC ran, so it is not evidence of a denial.
@@ -1168,7 +1155,7 @@ def _assert_denied_for_rbac(call: Callable[[], Any], context: str) -> None:
         assert denied_by_status or denied_by_text, f"expected an access denial for {context}, got: {leaves!r}"
         print(f"    -> Outsider {context} rejected at the transport (expected): {leaves[0]}")
     else:
-        assert result.isError, f"Outsider {context} should be denied, got: {result}"
+        assert result.is_error, f"Outsider {context} should be denied, got: {result}"
         detail = result.content[0].text.lower()
         assert "access denied" in detail, f"expected an access denial for {context}, got: {result.content[0].text}"
         print(f"    -> Outsider {context} denied (expected): {result.content[0].text}")
@@ -1176,14 +1163,27 @@ def _assert_denied_for_rbac(call: Callable[[], Any], context: str) -> None:
 
 @asynccontextmanager
 async def _mcp_session(server_url: str, access_token: str | None = None) -> AsyncIterator[ClientSession]:
-    """Open an initialized MCP client session over Streamable HTTP."""
+    """Open an initialized MCP client session over Streamable HTTP.
+
+    The mcp 2.x transport turns a non-2xx handshake response into a generic
+    JSON-RPC error and drops the HTTP status, so the gateway's ``ErrorResponseHook``
+    is attached to the client and a failed handshake is re-raised as
+    ``httpx2.HTTPStatusError`` carrying the real status (401, 403, ...).
+    """
     url = _mcp_client_url(server_url)
     headers = {"Authorization": f"Bearer {access_token}"} if access_token else None
-    timeout = timedelta(seconds=_CLIENT_TIMEOUT)
-    async with streamablehttp_client(url, headers=headers, timeout=timeout, sse_read_timeout=timeout) as (read_stream, write_stream, _):
-        async with ClientSession(read_stream, write_stream, read_timeout_seconds=timeout) as session:
-            await session.initialize()
-            yield session
+    http_client = create_mcp_http_client(headers=headers, timeout=httpx2.Timeout(_CLIENT_TIMEOUT))
+    error_hook = ErrorResponseHook().install(http_client)
+    try:
+        async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream, read_timeout_seconds=_CLIENT_TIMEOUT) as session:
+                await session.initialize()
+                yield session
+    except BaseException as exc:  # noqa: BLE001 — re-raised below unless translated
+        status_error = error_hook.to_http_status_error(exc)
+        if status_error is None:
+            raise
+        raise status_error from exc
 
 
 async def _async_mcp_tools_list(access_token: str, server_url: str = BASE_URL) -> list:
@@ -1419,7 +1419,7 @@ class TestMcpToolCallByRole:
 
     def test_admin_calls_tool_success(self, test_users: dict) -> None:
         result = _mcp_tool_call(test_users["admin"]["access_token"], "mcp-rbac-streamable-http-gw-get-system-time", {"timezone": "UTC"})
-        assert not result.isError, f"Admin tool call should succeed: {result}"
+        assert not result.is_error, f"Admin tool call should succeed: {result}"
         text = result.content[0].text
         assert len(text) > 0
         print(f"    -> Admin call mcp-rbac-streamable-http-gw-get-system-time = {text}")
@@ -1427,13 +1427,13 @@ class TestMcpToolCallByRole:
     def test_developer_can_execute_on_default_endpoint(self, test_users: dict) -> None:
         """Developer has team-scoped tools.execute; check_any_team=True allows it on /mcp."""
         result = _mcp_tool_call(test_users["developer"]["access_token"], "mcp-rbac-streamable-http-gw-get-system-time", {"timezone": "UTC"})
-        assert not result.isError, f"Developer tool call should succeed (check_any_team): {result}"
+        assert not result.is_error, f"Developer tool call should succeed (check_any_team): {result}"
         print(f"    -> Developer call succeeded: {result.content[0].text}")
 
     def test_team_admin_can_execute_on_default_endpoint(self, test_users: dict) -> None:
         """Team admin has team-scoped tools.execute; check_any_team=True allows it on /mcp."""
         result = _mcp_tool_call(test_users["team_admin"]["access_token"], "mcp-rbac-streamable-http-gw-get-system-time", {"timezone": "UTC"})
-        assert not result.isError, f"Team admin tool call should succeed (check_any_team): {result}"
+        assert not result.is_error, f"Team admin tool call should succeed (check_any_team): {result}"
         print(f"    -> Team admin call succeeded: {result.content[0].text}")
 
     def test_outsider_denied_tools_execute(self, outsider_user: dict) -> None:
@@ -1458,7 +1458,7 @@ class TestMcpToolCallByRole:
     def test_viewer_can_execute_on_default_endpoint(self, test_users: dict) -> None:
         """Viewer has team-scoped tools.execute; check_any_team=True allows it on /mcp."""
         result = _mcp_tool_call(test_users["viewer"]["access_token"], "mcp-rbac-streamable-http-gw-get-system-time", {"timezone": "UTC"})
-        assert not result.isError, f"Viewer tool call should succeed (check_any_team): {result}"
+        assert not result.is_error, f"Viewer tool call should succeed (check_any_team): {result}"
         print(f"    -> Viewer call succeeded: {result.content[0].text}")
 
 
@@ -1495,7 +1495,7 @@ class TestMcpScopedTokenPermissions:
     def test_unscoped_admin_token_can_call_tools(self, test_users: dict) -> None:
         """Admin token without custom scope (empty permissions = pass-through) can call tools."""
         result = _mcp_tool_call(test_users["admin"]["access_token"], "mcp-rbac-streamable-http-gw-get-system-time", {"timezone": "UTC"})
-        assert not result.isError, f"Unscoped admin token should succeed: {result}"
+        assert not result.is_error, f"Unscoped admin token should succeed: {result}"
         text = result.content[0].text
         assert len(text) > 0
         print(f"    -> Unscoped admin token call = {text}")
@@ -1522,7 +1522,7 @@ class TestMcpStreamableHttpTransport:
         assert len(time_tools) > 0, f"Expected at least one get-system-time tool, got: {[t.name for t in tools]}"
         # Call the first one found
         result = _mcp_tool_call(test_users["admin"]["access_token"], time_tools[0], {"timezone": "UTC"})
-        assert not result.isError, f"Streamable HTTP get-system-time failed: {result}"
+        assert not result.is_error, f"Streamable HTTP get-system-time failed: {result}"
         print(f"    -> Streamable HTTP {time_tools[0]} = {result.content[0].text}")
 
     def test_streamable_http_convert_time(self, test_users: dict) -> None:
@@ -1534,7 +1534,7 @@ class TestMcpStreamableHttpTransport:
             convert_tools[0],
             {"time": "2025-06-01T10:00:00Z", "source_timezone": "UTC", "target_timezone": "Europe/London"},
         )
-        assert not result.isError, f"Streamable HTTP convert-time failed: {result}"
+        assert not result.is_error, f"Streamable HTTP convert-time failed: {result}"
         print(f"    -> Streamable HTTP {convert_tools[0]}: OK")
 
     def test_streamable_http_resources_discoverable(self, test_users: dict) -> None:
@@ -1809,15 +1809,15 @@ class TestTokenLifecycle:
             time.sleep(_REVOCATION_PROPAGATION_SECONDS)
 
             # A revoked token fails the JWT auth dependency before any MCP method
-            # dispatch, so the SDK surfaces it as a raw httpx.HTTPStatusError from
-            # the initialize POST -- wrapped in one or more ExceptionGroup layers
-            # because the SDK runs that POST inside anyio TaskGroups (see
-            # _unwrap_exception_group). Narrowed to these two types and to status
-            # 401 so an unrelated transport failure (a restart, a timeout) cannot
-            # read as "revocation confirmed".
-            with pytest.raises((httpx.HTTPStatusError, ExceptionGroup)) as excinfo:
+            # dispatch, so the gateway answers the initialize POST with 401.
+            # _mcp_session re-surfaces that as httpx2.HTTPStatusError (the mcp 2.x
+            # transport itself drops the status) -- possibly wrapped in
+            # ExceptionGroup layers (see _unwrap_exception_group). Narrowed to
+            # these two types and to status 401 so an unrelated transport
+            # failure (a restart, a timeout) cannot read as "revocation confirmed".
+            with pytest.raises((httpx2.HTTPStatusError, ExceptionGroup)) as excinfo:
                 _mcp_initialize_only(minted["access_token"])
-            status_errors = [e for e in _unwrap_exception_group(excinfo.value) if isinstance(e, httpx.HTTPStatusError)]
+            status_errors = [e for e in _unwrap_exception_group(excinfo.value) if isinstance(e, httpx2.HTTPStatusError)]
             assert status_errors and status_errors[0].response.status_code == 401, f"expected a 401 from the revoked token, got: {excinfo.value!r}"
             print(f"    -> Revoked token rejected on MCP (expected): {status_errors[0]}")
         finally:
@@ -1860,13 +1860,13 @@ class TestTokenLifecycle:
             result = None
             try:
                 result = _mcp_tool_call(minted["access_token"], f"{STREAMABLE_HTTP_GATEWAY_NAME}-get-system-time", {"timezone": "UTC"})
-            except (McpError, httpx.HTTPError, RuntimeError, TimeoutError, ExceptionGroup) as exc:
+            except _TRANSPORT_ERRORS as exc:
                 leaves = _unwrap_exception_group(exc)
                 assert any("access denied" in str(leaf).lower() for leaf in leaves), f"expected an access-denial error, got: {leaves!r}"
                 print(f"    -> Scoped token denied execute at the transport (expected): {leaves[0]}")
 
             if result is not None:
-                assert result.isError, f"tools.read-only token must be denied tools.execute, got: {result}"
+                assert result.is_error, f"tools.read-only token must be denied tools.execute, got: {result}"
                 print(f"    -> Scoped token denied execute (expected): {result.content[0].text}")
         finally:
             with suppress(Exception):
@@ -1888,7 +1888,7 @@ class TestCrossTransportConsistency:
 
         for tool_name in time_tools[:2]:  # Test up to 2 variants
             result = _mcp_tool_call(test_users["admin"]["access_token"], tool_name, {"timezone": "UTC"})
-            assert not result.isError, f"{tool_name} failed: {result}"
+            assert not result.is_error, f"{tool_name} failed: {result}"
             text = result.content[0].text
             assert len(text) > 0, f"{tool_name} returned empty text"
             print(f"    -> {tool_name} = {text}")
@@ -1905,7 +1905,7 @@ class TestCrossTransportConsistency:
                 tool_name,
                 {"time": "2025-01-15T12:00:00Z", "source_timezone": "UTC", "target_timezone": "America/New_York"},
             )
-            assert not result.isError, f"{tool_name} failed: {result}"
+            assert not result.is_error, f"{tool_name} failed: {result}"
             text = result.content[0].text
             assert len(text) > 0, f"{tool_name} returned empty text"
             print(f"    -> {tool_name} = {text}")
@@ -2199,6 +2199,97 @@ def create_server(admin_api: APIRequestContext, owned_objects: _OwnedObjects) ->
 
 
 @pytest.fixture
+def same_name_private_tools(admin_api: APIRequestContext, playwright: Playwright, create_team: Any) -> Generator[dict[str, dict[str, str]], None, None]:
+    """Create two user-owned private gateways with identical tool names.
+
+    Args:
+        admin_api: Authenticated admin API context.
+        playwright: Playwright entry point for user token creation.
+        create_team: Factory that creates tracked teams.
+
+    Yields:
+        Tenant tokens, servers, tool names, and expected echo markers.
+    """
+    uid = uuid.uuid4().hex[:8]
+    gateway_name = f"{LIFECYCLE_PREFIX}-shared-gateway-{uid}"
+    tenants: dict[str, dict[str, str]] = {}
+    user_records: list[dict[str, Any]] = []
+    user_contexts: list[APIRequestContext] = []
+    gateway_ids: list[str] = []
+    server_ids: list[str] = []
+
+    try:
+        for tenant_label in ("tenant-a", "tenant-b"):
+            _payload, team = _created_team(create_team, name=f"{LIFECYCLE_PREFIX}-{tenant_label}-{uid}")
+            team_id = team["id"]
+            email = f"{LIFECYCLE_PREFIX}-{tenant_label}-{uid}@test.com"
+            user = _create_user_with_token(admin_api, playwright, email, team_id=team_id, rbac_role="developer")
+            user_records.append(user)
+            user_api = _api_context(playwright, user["access_token"])
+            user_contexts.append(user_api)
+
+            gateway_resp = user_api.post(
+                "/gateways",
+                data={
+                    "name": gateway_name,
+                    "url": _GATEWAY_UPSTREAM_URL,
+                    "transport": "STREAMABLEHTTP",
+                    "visibility": "private",
+                },
+            )
+            assert gateway_resp.status in (200, 201, 202), f"POST /gateways returned {gateway_resp.status}: {gateway_resp.text()[:500]}"
+            gateway_id = _json_or_fail(gateway_resp, "POST /gateways")["id"]
+            gateway_ids.append(gateway_id)
+
+            names = _wait_for_gateway_tool_names(user_api, gateway_id)
+            assert names, f"gateway {gateway_id} reported no tools within {_GATEWAY_SYNC_DEADLINE:.0f}s"
+            tools = _gateway_tools(user_api, gateway_id)
+            echo_tool = next((tool for tool in tools if tool["name"].endswith("-echo")), None)
+            assert echo_tool, f"gateway {gateway_id} did not expose an echo tool: {sorted(names)}"
+
+            server_resp = user_api.post(
+                "/servers",
+                data={
+                    "server": {
+                        "name": f"{LIFECYCLE_PREFIX}-{tenant_label}-server-{uid}",
+                        "description": "Same-name tenant cache isolation fixture",
+                        "associated_tools": [echo_tool["id"]],
+                    },
+                    "visibility": "private",
+                },
+            )
+            assert server_resp.status in (200, 201), f"POST /servers returned {server_resp.status}: {server_resp.text()[:500]}"
+            server_id = _json_or_fail(server_resp, "POST /servers")["id"]
+            server_ids.append(server_id)
+            tenants[tenant_label] = {
+                "access_token": user["access_token"],
+                "server_id": server_id,
+                "tool_name": echo_tool["name"],
+                "marker": f"{tenant_label}-{uid}",
+            }
+
+        tool_names = {tenant["tool_name"] for tenant in tenants.values()}
+        assert len(tool_names) == 1, f"tenant gateways produced different tool names: {sorted(tool_names)}"
+        yield tenants
+    finally:
+        failures: list[str] = []
+        for server_id in reversed(server_ids):
+            failure = _delete_owned(admin_api, "/servers", server_id)
+            if failure:
+                failures.append(failure)
+        for gateway_id in reversed(gateway_ids):
+            failure = _delete_owned(admin_api, "/gateways", gateway_id)
+            if failure:
+                failures.append(failure)
+        for user_api in reversed(user_contexts):
+            user_api.dispose()
+        for user in reversed(user_records):
+            _cleanup_user(admin_api, user)
+        if failures:
+            pytest.fail("Tenant cache fixture cleanup failed:\n  " + "\n  ".join(failures))
+
+
+@pytest.fixture
 def create_resource(admin_api: APIRequestContext, owned_objects: _OwnedObjects) -> Any:
     """Return a factory that creates throwaway resources.
 
@@ -2317,6 +2408,74 @@ class TestVirtualServerLifecycle:
         observed = _names_when_ready(lambda: {tool.name for tool in _mcp_tools_list(admin_token, server_url=_server_mcp_base(server_id))}, expected_names)
         assert observed == expected_names, f"MCP tools/list mismatch: missing={sorted(expected_names - observed)} unexpected={sorted(observed - expected_names)}"
         assert held_back not in observed, f"held-back tool {held_back} leaked into the scoped MCP catalog"
+
+    def test_detached_tool_cannot_use_warmed_lookup(self, admin_api: APIRequestContext, create_server: Any, lifecycle_tools: list[dict[str, Any]], admin_token: str) -> None:
+        """A detached tool must fail after its server-scoped lookup is warmed.
+
+        Args:
+            admin_api: Authenticated admin API context.
+            create_server: Factory that returns the raw creation response.
+            lifecycle_tools: The gateway's enabled tools.
+            admin_token: Un-narrowed platform-admin JWT.
+        """
+        echo_tool = next((tool for tool in lifecycle_tools if tool["name"].endswith("-echo")), None)
+        assert echo_tool, "The live gateway fixture must expose an echo tool"
+
+        resp = create_server(tool_ids=[echo_tool["id"]])
+        assert resp.status == 201, f"POST /servers returned {resp.status}: {resp.text()[:500]}"
+        server_id = _json_or_fail(resp, "POST /servers")["id"]
+        server_url = _server_mcp_base(server_id)
+
+        warmed = _mcp_tool_call(admin_token, echo_tool["name"], {"message": "warm-cache"}, server_url=server_url)
+        assert not warmed.is_error, f"Initial tools/call failed: {warmed}"
+
+        updated = admin_api.put(f"/servers/{server_id}", data={"associated_tools": []})
+        assert updated.status == 200, f"PUT /servers/{server_id} returned {updated.status}: {updated.text()[:500]}"
+
+        try:
+            detached = _mcp_tool_call(admin_token, echo_tool["name"], {"message": "must-fail"}, server_url=server_url)
+        except (McpError, ExceptionGroup) as exc:
+            leaves = _unwrap_exception_group(exc)
+            assert any(isinstance(leaf, McpError) and "not found" in str(leaf).lower() for leaf in leaves), f"Detached tool returned the wrong protocol error: {leaves!r}"
+            return
+
+        assert detached.is_error, f"Detached tool remained invocable: {detached}"
+        assert "not found" in detached.content[0].text.lower(), f"Detached tool returned the wrong error: {detached}"
+
+    @pytest.mark.parametrize(
+        ("first_tenant", "second_tenant"),
+        [("tenant-a", "tenant-b"), ("tenant-b", "tenant-a")],
+    )
+    def test_same_name_private_tools_remain_owner_scoped(
+        self,
+        same_name_private_tools: dict[str, dict[str, str]],
+        first_tenant: str,
+        second_tenant: str,
+    ) -> None:
+        """Same-name tools must resolve inside each tenant in both cache orders.
+
+        Args:
+            same_name_private_tools: Two private gateway and server records.
+            first_tenant: Tenant that warms the shared tool name first.
+            second_tenant: Tenant that invokes the same name second.
+        """
+        for tenant_label in (first_tenant, second_tenant):
+            tenant = same_name_private_tools[tenant_label]
+            server_url = _server_mcp_base(tenant["server_id"])
+            observed = _names_when_ready(
+                lambda tenant=tenant, server_url=server_url: {tool.name for tool in _mcp_tools_list(tenant["access_token"], server_url=server_url)},
+                {tenant["tool_name"]},
+            )
+            assert observed == {tenant["tool_name"]}, f"{tenant_label} scoped tools/list returned {sorted(observed)}"
+
+            result = _mcp_tool_call(
+                tenant["access_token"],
+                tenant["tool_name"],
+                {"message": tenant["marker"]},
+                server_url=server_url,
+            )
+            assert not result.is_error, f"{tenant_label} same-name tool invocation failed: {result}"
+            assert tenant["marker"] in result.content[0].text, f"{tenant_label} received wrong tool result: {result}"
 
     def test_associated_resources_reachable_via_mcp(self, admin_api: APIRequestContext, create_server: Any, create_resource: Any, admin_token: str) -> None:
         """The per-server REST records and the MCP catalog both report the associated resource.
