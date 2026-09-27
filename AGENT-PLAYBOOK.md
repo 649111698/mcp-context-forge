@@ -69,13 +69,21 @@
    python3 - <<'EOF'
    from pathlib import Path
    src = Path("Containerfile").read_text()
-   # 坑1: pip 引导阶段走阿里云源（清华源缺 cpex-sql-sanitizer 会 404）
-   marker = "ARG ENABLE_PROFILING=false\nRUN set -euo pipefail \\\n    && . /etc/profile.d/use-openssl.sh"
-   inject = ("ARG ENABLE_PROFILING=false\n"
-             "ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/\n"
-             "RUN set -euo pipefail \\\n    && . /etc/profile.d/use-openssl.sh")
+   # 坑1: pip 引导阶段（venv + pip install uv/setuptools）走阿里云源（清华源缺 cpex-sql-sanitizer 会 404）。
+   # ⚠️ 锚点用 "python3 -m venv" 续行定位：上游在 ARG 与 RUN 之间插过注释行（旧锚点 ARG+RUN 紧邻已失效），
+   # 且 Step 2 的 uv 安装 RUN 同样以 use-openssl.sh 开头——那个绝不能配镜像（见坑2）。
+   marker = ("RUN set -euo pipefail \\\n"
+             "    && . /etc/profile.d/use-openssl.sh \\\n"
+             "    && python3 -m venv /app/.venv")
+   inject = ("ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/\n"
+             "ENV UV_HTTP_TIMEOUT=300\n"
+             "RUN set -euo pipefail \\\n"
+             "    && . /etc/profile.d/use-openssl.sh \\\n"
+             "    && python3 -m venv /app/.venv")
    assert src.count(marker) == 1
    src = src.replace(marker, inject)
+   # 坑4: UV_HTTP_TIMEOUT=300 必须有——uv 直连 PyPI（国内慢），依赖集大改触发全量重下时
+   #   默认 30s 超时会 Download timeout（2026-09-27 mcp 2.0 升级时踩过）。
    # 坑2: ⚠️ 绝对不要给 uv 配国内镜像（UV_DEFAULT_INDEX）！
    #   pyproject 有 exclude-newer="10 days"（供应链防护，只装上传超10天的包），
    #   国内镜像元数据缺 upload-time 字段 → uv 保守排除 → 依赖解析失败。
