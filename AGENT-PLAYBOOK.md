@@ -11,7 +11,7 @@
   - 上述页面/服务的**中文化**（只汉化 fork 自有文案，上游文案不动，避免同步冲突）
   - 3 个自定义 alembic 迁移（tool_api_sources 表，链路见 §3）
   - 部署文件：`docker-compose.aliyun.yml`、`k8s/mcp-hub.yaml`、`.env.aliyun.local`（gitignored）
-- 版本镜像 tag 规则：`v1.0.10-<上游合并后的 head 短 sha>`（v1.0.10 对齐上游 release，别用自造的 v1.0.14/16/20 旧编号）
+- 版本镜像 tag 规则：`v1.0.11-<上游合并后的 head 短 sha>`（前缀对齐上游最新 release，2026-09-28 起为 v1.0.11；上游发新 release 时同步换前缀，别用自造编号）
 
 ## 1. 远程仓库与网络
 
