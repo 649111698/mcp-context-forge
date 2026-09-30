@@ -53,7 +53,7 @@
    git diff main..origin/main --stat -- mcpgateway/alembic/   # 有输出才需要处理
    cd mcpgateway && alembic heads    # 必须只有一个 head
    ```
-   fork 自有迁移链 `a3b5c7d9e1f2→b4c6d8e0f2a3→c5d7e9f1a3b4` 从上游 `12d4a0c7789c` 分叉，当前 fork head 为 `5e211ec89cad`。
+   fork 自有迁移链 `a3b5c7d9e1f2→b4c6d8e0f2a3→c5d7e9f1a3b4` 从上游 `12d4a0c7789c` 分叉；上游 v1.0.11 后的迁移链自然接在 fork head 上（当前 head 为 `c7e91a2b4d60`，2026-09-29 resource namespacing，直接前驱是我们 repoint 过的 `5e211ec89cad`）。
    若上游新迁移的 `down_revision` 指向 ≤`12d4a0c7789c`，会产生两个 head → 把新迁移的 `down_revision` 改指当前 fork head（参考 5e211ec89cad 文件内注释）。
 3. **依赖 + 测试**（跑全集太慢，跑针对性子集 + 冒烟）：
    ```bash
@@ -122,7 +122,7 @@
    #  - 铸 JWT 后 GET /tools → 12 个（数量变了要查明原因）
    #  - POST /api/logs/search → total > 0（结构化日志链路）
    #  - GET /admin/tool-apis/partial → 200 且含「已保存」（中文页）
-   #  - DB: SELECT version_num FROM alembic_version → 应为 5e211ec89cad（除非本次有新迁移）
+   #  - DB: SELECT version_num FROM alembic_version → 应为 c7e91a2b4d60（2026-09-29 起；除非本次有新迁移）
    # 铸 JWT：source .env.aliyun.local 后
    #   uv run --no-project python -m mcpgateway.utils.create_jwt_token \
    #     --username admin@example.com --admin -e 30 --secret "$JWT_SECRET_KEY"
