@@ -3782,6 +3782,7 @@ Disallow: /
     validation_dangerous_js_pattern: str = r"(?i)(?:^|\s|[\"'`<>=])(javascript:|vbscript:|data:\s*[^,]*[;\s]*(javascript|vbscript)|\bon[a-z]+\s*=|<\s*script\b)"
 
     validation_allowed_url_schemes: List[str] = ["http://", "https://", "ws://", "wss://"]
+    strict_scheme_enforcement: bool = False
 
     # Character validation patterns
     validation_name_pattern: str = r"^[\w.\- ]+$"  # Unicode letters/digits plus ._- and space (\w is Unicode-aware so CJK names pass; HTML chars still blocked by the dedicated check)
