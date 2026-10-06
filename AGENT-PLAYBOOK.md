@@ -24,6 +24,9 @@
 - **访问 GitHub 走本地代理**：`git -c http.proxy=http://127.0.0.1:7897 <fetch/push> ...`，失败重试 3–5 次（GFW 抖动是常态）
 - **免代理备选拉上游**（代理不通时用，已验证可用）：
   `git -c http.proxy= -c https.proxy= fetch https://ghfast.top/https://github.com/IBM/mcp-context-forge.git refs/heads/main:refs/remotes/upstream/main`
+- **免代理推 GitHub 备份**（2026-10-06 验证可用，fetch/push 都走 ghfast.top，不依赖 Clash）：
+  `git -c http.proxy= -c https.proxy= push https://ghfast.top/https://github.com/649111698/mcp-context-forge.git main:main`
+  （fork 上若有 Sync fork 空合并提交挡路，先核实 `git rev-list --no-merges main..origin/main` 为 0 再 +main:main 强推）
 - 结构为 WeKnora 模式（2026-09-11 起）：单仓库 + 直接拉上游合并，**没有** GitLab 上游镜像/fork 关系（旧的 `ai/upstream/*` 已删除，不要再建）。GitLab 仓库**只保留 main 一个分支、零 tag**——上游 release tag 只留在本地作参考，永远不要 `--tags` 推到 GitLab（2026-09-11 已清理过一次 13 个上游 tag）
 - GitLab 直连即可；git 凭据在 macOS 钥匙串（用户 xie）。GitLab REST API 不收密码，需要时用 OAuth 密码换 token（scope=api，2 小时过期）
 - 仓库全量约 87MB（上游历史包袱：编译产物/coverage 报告/大图，我们自己的提交只占 60/3249），**属正常现象不要试图物理瘦身**——砍老历史会断掉与上游的共同祖先，merge 工作流就废了。CI/同事克隆用 `--depth 1`（仅 16MB）
