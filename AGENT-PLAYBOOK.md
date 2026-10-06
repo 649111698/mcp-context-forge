@@ -109,6 +109,28 @@
    # ⚠️ 退出码要用 BUILD_EXIT 判断，不要接 | tail（管道会吞掉失败码）
    rm -f Containerfile.mirror
    ```
+   **PyPI 直连被限流/断连时的兜底（2026-10-06 实战验证）**：overlay 里在 Step 2 的 RUN 前插
+   `COPY wheelhouse-img/ /tmp/wheels/`，并把该分支里 `"psycopg[c]>=3.3.3"` 改成 `"psycopg[binary]>=3.3.3"`
+   （psycopg-c 无 wheel 只有 sdist），即触发上游既有的 hermetic `--no-index --find-links` 离线安装。
+   wheelhouse 在宿主机备：
+   ```bash
+   uv export --frozen --no-hashes --no-dev --no-emit-project \
+     --extra redis --extra observability --extra plugins --extra llmchat -o /tmp/wh-req.txt
+   echo 'psycopg==3.3.6' >> /tmp/wh-req.txt; echo 'psycopg-binary==3.3.6' >> /tmp/wh-req.txt
+   # ⚠️ --no-emit-project 必须带，否则 pip 会就地构建项目（UI 钩子）爆出几十 GB 的 zip
+   # ⚠️ --platform 要列全 manylinux 系列（pip 是精确 tag 匹配不做 glibc 向下展开；
+   #   cpex 系 wheel 是 manylinux_2_34，argon2-cffi-bindings 是 2_26/2_28）
+   uv run --no-project python -m pip download -r /tmp/wh-req.txt -d wheelhouse-img/ \
+     --index-url https://pypi.org/simple/ \
+     --platform manylinux_2_34_x86_64 --platform manylinux_2_28_x86_64 --platform manylinux_2_26_x86_64 \
+     --platform manylinux_2_24_x86_64 --platform manylinux_2_23_x86_64 --platform manylinux_2_22_x86_64 \
+     --platform manylinux_2_21_x86_64 --platform manylinux_2_20_x86_64 --platform manylinux_2_19_x86_64 \
+     --platform manylinux_2_18_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
+     --platform manylinux2010_x86_64 --platform manylinux1_x86_64 --platform linux_x86_64 \
+     --only-binary=:all: --python-version 3.12 --implementation cp
+   # 另补构建后端：uv run --no-project python -m pip download 'setuptools>=78.1.1' 'wheel>=0.46.2' \
+   #   -d wheelhouse-img/ --index-url https://mirrors.aliyun.com/pypi/simple/ --only-binary=:all:
+   # wheelhouse-img/ 约 64MB，目录别提交（构建完可留着复用；.dockerignore 排除 wheels/ 所以必须用这个名字）
 5. **bump 三处 tag**（sed 全局替换旧 tag → 新 tag）：
    - `docker-compose.aliyun.yml:11`（IMAGE_TAG 默认值）
    - `k8s/mcp-hub.yaml:76`（生产镜像）
