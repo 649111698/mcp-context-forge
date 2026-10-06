@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **`make testing-up` web UI URL** - The startup summary now shows a `ContextForge Web UI` row whose port comes from the resolved Compose configuration. The printed URL now matches the port Compose publishes when `WEB_UI_PORT` is set only in `.env`. Resolution failure stops the target instead of printing a fallback URL.
+
 - **JWT lifecycle clarification after database reset** - Local JWTs remain cryptographically valid when database storage is lost but the signing key remains unchanged. Database cleanup is not credential rotation. Destructive resets must rotate `JWT_SECRET_KEY` when old-token invalidation is required. Persistent database storage and short-lived local tokens remain recommended for production deployments.
 
 - **Federated gateway tool-name collisions** - Gateway registration, refresh, OAuth discovery, reactivation, rename, and visibility updates now reject detected tool-name collisions in public, team, and private visibility scopes. Gateway automation must handle the endpoint's conflict response when a previously accepted colliding registration is rejected. Existing duplicate rows require administrator review before affected invocation names are usable. Operators can identify duplicates with:
@@ -19,6 +21,7 @@
   ```
 
 - **Modern MCP protocol negotiation is on by default** - `MCP_CLIENT_CONNECT_MODE` and `MCP_INBOUND_PROTOCOL_MODE` now default to `auto` instead of `legacy`. Outbound upstream connections probe `server/discover` and negotiate the 2026-07-28 revision, with transparent fallback to the legacy `initialize` handshake. Inbound clients may send `mcp-protocol-version: 2026-07-28` instead of receiving a 400. Set either variable to `legacy` to restore the previous behaviour.
+- **`mcp-servers/` directory removed** - The unsupported sample/test MCP servers, the Go/Python scaffolding templates, and the `mcp-url-to-markdown-tests` workflow leave the repository. The six Python servers now live in [IBM/contextforge-examples](https://github.com/IBM/contextforge-examples) under `mcp-servers/python/`; the scaffolding templates are deleted without migration. The performance compose generator and benchmark docs now use the published `ghcr.io/ibm/cfex-mcp-fast-time-server` and `ghcr.io/ibm/cfex-mcp-benchmark-server` images. The `/v1/mcp-servers` REST API is unchanged: it remains the product-language alias for the gateways API.
 
 ## [Unreleased]
 

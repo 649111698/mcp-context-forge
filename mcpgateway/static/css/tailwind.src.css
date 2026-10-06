@@ -1,3 +1,275 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Dark mode via .dark class on <html> */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* FORK-CUSTOM-START (pexetech/mcp-hub) — Ant Design v5 design-token mapping.
+ * Ported from the deleted tailwind.config.js when upstream migrated Tailwind
+ * v3 -> v4 (#7135). The admin UI keeps upstream Jinja2 templates untouched;
+ * color scales are remapped to the official antd palettes so existing
+ * utilities (bg-indigo-600, text-gray-500, ...) resolve to antd tokens.
+ *
+ * Mapping rules:
+ *   indigo, blue -> antd blue      (#1677ff = colorPrimary; main interactive color)
+ *   gray, slate  -> antd neutral   (works for both light and `dark:` variants)
+ *   red          -> antd red       (#ff4d4f = colorError)
+ *   green, emerald -> antd green; teal, cyan -> antd cyan
+ *   yellow, amber -> antd gold; orange -> antd orange
+ *   purple -> antd purple; pink -> antd magenta; rose -> antd volcano
+ *
+ * Radius mirrors antd: rounded-sm = 4px = borderRadiusSM, rounded-md = 6px =
+ * borderRadius (controls), rounded-lg = 8px = card radius.
+ * Note: v3 bare `rounded` (borderRadius.DEFAULT) has no v4 token — v4's bare
+ * `rounded` utility is hardcoded to .25rem; templates using bare `rounded`
+ * fall back to that default instead of the antd 6px. Audit showed admin
+ * templates rely on -sm/-md/-lg variants, so this is acceptable.
+ */
+@theme {
+    /* antd neutral (gray) palette, steps 50-950 — gray + slate */
+    --color-gray-50: #fafafa;
+    --color-gray-100: #f5f5f5;
+    --color-gray-200: #f0f0f0;
+    --color-gray-300: #d9d9d9;
+    --color-gray-400: #bfbfbf;
+    --color-gray-500: #8c8c8c;
+    --color-gray-600: #595959;
+    --color-gray-700: #434343;
+    --color-gray-800: #262626;
+    --color-gray-900: #141414;
+    --color-gray-950: #000000;
+    --color-slate-50: #fafafa;
+    --color-slate-100: #f5f5f5;
+    --color-slate-200: #f0f0f0;
+    --color-slate-300: #d9d9d9;
+    --color-slate-400: #bfbfbf;
+    --color-slate-500: #8c8c8c;
+    --color-slate-600: #595959;
+    --color-slate-700: #434343;
+    --color-slate-800: #262626;
+    --color-slate-900: #141414;
+    --color-slate-950: #000000;
+
+    /* antd blue — Chinese enterprise admin standard (colorPrimary #1677ff).
+     * 600 and 500 both resolve to the primary so bg-indigo-600 /
+     * text-indigo-500 stay on-brand; hover (700) is the antd lighter hover
+     * blue, active (800) the darker antd pressed blue. */
+    --color-indigo-50: #e6f4ff;
+    --color-indigo-100: #bae0ff;
+    --color-indigo-200: #91caff;
+    --color-indigo-300: #69b1ff;
+    --color-indigo-400: #4096ff;
+    --color-indigo-500: #1677ff;
+    --color-indigo-600: #1677ff;
+    --color-indigo-700: #4096ff;
+    --color-indigo-800: #0958d9;
+    --color-indigo-900: #003eb3;
+    --color-indigo-950: #002c8c;
+    --color-blue-50: #e6f4ff;
+    --color-blue-100: #bae0ff;
+    --color-blue-200: #91caff;
+    --color-blue-300: #69b1ff;
+    --color-blue-400: #4096ff;
+    --color-blue-500: #1677ff;
+    --color-blue-600: #1677ff;
+    --color-blue-700: #4096ff;
+    --color-blue-800: #0958d9;
+    --color-blue-900: #003eb3;
+    --color-blue-950: #002c8c;
+
+    /* antd red (colorError #ff4d4f) */
+    --color-red-50: #fff1f0;
+    --color-red-100: #ffccc7;
+    --color-red-200: #ffa39e;
+    --color-red-300: #ff7875;
+    --color-red-400: #ff4d4f;
+    --color-red-500: #ff4d4f;
+    --color-red-600: #f5222d;
+    --color-red-700: #cf1322;
+    --color-red-800: #a8071a;
+    --color-red-900: #820014;
+    --color-red-950: #5c0011;
+
+    /* antd green (#52c41a) — green + emerald */
+    --color-green-50: #f6ffed;
+    --color-green-100: #d9f7be;
+    --color-green-200: #b7eb8f;
+    --color-green-300: #95de64;
+    --color-green-400: #73d13d;
+    --color-green-500: #52c41a;
+    --color-green-600: #52c41a;
+    --color-green-700: #389e0d;
+    --color-green-800: #237804;
+    --color-green-900: #135200;
+    --color-green-950: #092b00;
+    --color-emerald-50: #f6ffed;
+    --color-emerald-100: #d9f7be;
+    --color-emerald-200: #b7eb8f;
+    --color-emerald-300: #95de64;
+    --color-emerald-400: #73d13d;
+    --color-emerald-500: #52c41a;
+    --color-emerald-600: #52c41a;
+    --color-emerald-700: #389e0d;
+    --color-emerald-800: #237804;
+    --color-emerald-900: #135200;
+    --color-emerald-950: #092b00;
+
+    /* antd cyan (#13c2c2) — teal + cyan */
+    --color-teal-50: #e6fffb;
+    --color-teal-100: #b5f5ec;
+    --color-teal-200: #87e8de;
+    --color-teal-300: #5cdbd3;
+    --color-teal-400: #36cfc9;
+    --color-teal-500: #13c2c2;
+    --color-teal-600: #13c2c2;
+    --color-teal-700: #08979c;
+    --color-teal-800: #006d75;
+    --color-teal-900: #00474f;
+    --color-teal-950: #002329;
+    --color-cyan-50: #e6fffb;
+    --color-cyan-100: #b5f5ec;
+    --color-cyan-200: #87e8de;
+    --color-cyan-300: #5cdbd3;
+    --color-cyan-400: #36cfc9;
+    --color-cyan-500: #13c2c2;
+    --color-cyan-600: #13c2c2;
+    --color-cyan-700: #08979c;
+    --color-cyan-800: #006d75;
+    --color-cyan-900: #00474f;
+    --color-cyan-950: #002329;
+
+    /* antd gold (#faad14) — yellow + amber */
+    --color-yellow-50: #fffbe6;
+    --color-yellow-100: #fff1b8;
+    --color-yellow-200: #ffe58f;
+    --color-yellow-300: #ffd666;
+    --color-yellow-400: #ffc53d;
+    --color-yellow-500: #faad14;
+    --color-yellow-600: #faad14;
+    --color-yellow-700: #d48806;
+    --color-yellow-800: #ad6800;
+    --color-yellow-900: #874d00;
+    --color-yellow-950: #612500;
+    --color-amber-50: #fffbe6;
+    --color-amber-100: #fff1b8;
+    --color-amber-200: #ffe58f;
+    --color-amber-300: #ffd666;
+    --color-amber-400: #ffc53d;
+    --color-amber-500: #faad14;
+    --color-amber-600: #faad14;
+    --color-amber-700: #d48806;
+    --color-amber-800: #ad6800;
+    --color-amber-900: #874d00;
+    --color-amber-950: #612500;
+
+    /* antd orange (#fa8c16) */
+    --color-orange-50: #fff7e6;
+    --color-orange-100: #ffe7ba;
+    --color-orange-200: #ffd591;
+    --color-orange-300: #ffc069;
+    --color-orange-400: #ffa940;
+    --color-orange-500: #fa8c16;
+    --color-orange-600: #fa8c16;
+    --color-orange-700: #d46b08;
+    --color-orange-800: #ad4e00;
+    --color-orange-900: #873800;
+    --color-orange-950: #612500;
+
+    /* antd purple (#722ed1) */
+    --color-purple-50: #f9f0ff;
+    --color-purple-100: #efdbff;
+    --color-purple-200: #d3adf7;
+    --color-purple-300: #b37feb;
+    --color-purple-400: #9254de;
+    --color-purple-500: #722ed1;
+    --color-purple-600: #722ed1;
+    --color-purple-700: #531dab;
+    --color-purple-800: #391085;
+    --color-purple-900: #22075e;
+    --color-purple-950: #120338;
+
+    /* antd magenta (#eb2f96) */
+    --color-pink-50: #fff0f6;
+    --color-pink-100: #ffd6e7;
+    --color-pink-200: #ffadd2;
+    --color-pink-300: #ff85c0;
+    --color-pink-400: #f759ab;
+    --color-pink-500: #eb2f96;
+    --color-pink-600: #eb2f96;
+    --color-pink-700: #c41d7f;
+    --color-pink-800: #9e1064;
+    --color-pink-900: #780650;
+    --color-pink-950: #520339;
+
+    /* antd volcano (#fa541c) */
+    --color-rose-50: #fff2e8;
+    --color-rose-100: #ffd8bf;
+    --color-rose-200: #ffbb96;
+    --color-rose-300: #ff9c6e;
+    --color-rose-400: #ff7a45;
+    --color-rose-500: #fa541c;
+    --color-rose-600: #fa541c;
+    --color-rose-700: #d4380d;
+    --color-rose-800: #ad2102;
+    --color-rose-900: #871400;
+    --color-rose-950: #610b00;
+
+    /* CJK-first system font stack (PingFang SC / Microsoft YaHei) */
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB",
+        "Microsoft YaHei", Arial, sans-serif, "Apple Color Emoji",
+        "Segoe UI Emoji", "Segoe UI Symbol";
+
+    /* antd radii: bare = 6px = borderRadius (v3 DEFAULT), sm = 4px =
+     * borderRadiusSM, md = 6px = borderRadius, lg = 8px = card radius */
+    --radius: 6px;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+
+    /* antd elevation shadows (v4 scale: bare `shadow` uses --shadow-sm via
+     * v3->v4 rename; both token names overridden to stay on antd look) */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+    --shadow-lg: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+    --shadow-2xl: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+}
+/* FORK-CUSTOM-END (pexetech/mcp-hub) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Custom animations (previously in tailwind.config.js theme.extend) */
+@keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50%       { transform: translateY(-20px); }
+}
+
+@keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.8; }
+}
+
+@keyframes slide-up {
+    0%   { transform: translateY(30px); opacity: 0; }
+    100% { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes fade-in {
+    0%   { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+@utility animate-float {
+    animation: float 6s ease-in-out infinite;
+}
+
+@utility animate-pulse-soft {
+    animation: pulse-soft 2s ease-in-out infinite;
+}
+
+@utility animate-slide-up {
+    animation: slide-up 0.8s ease-out;
+}
+
+@utility animate-fade-in {
+    animation: fade-in 1s ease-out;
+}
