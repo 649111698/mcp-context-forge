@@ -175,11 +175,12 @@ from mcpgateway.services.gateway_service import (
     GatewayConnectionError,
     GatewayCredentialError,
     GatewayDuplicateConflictError,
+    GatewayError,
     GatewayLookupConflictError,
     GatewayNameConflictError,
     GatewayNotFoundError,
-    GatewayToolNameConflictError,
     GatewayService,
+    GatewayToolNameConflictError,
     test_gateway_connectivity,
 )
 from mcpgateway.services.import_service import ConflictStrategy
@@ -203,7 +204,7 @@ from mcpgateway.services.token_catalog_service import TokenCatalogService
 from mcpgateway.services.tool_api_source_service import ToolApiSourceNotFoundError, ToolApiSourceValidationError, tool_api_source_service
 from mcpgateway.services.tool_service import ToolError, ToolLockConflictError, ToolNameConflictError, ToolNotFoundError, ToolService
 from mcpgateway.utils.create_jwt_token import create_jwt_token, get_jwt_token
-from mcpgateway.utils.error_formatter import ErrorFormatter, sanitize_validation_error_for_log
+from mcpgateway.utils.error_formatter import ErrorFormatter, safe_error_detail, sanitize_validation_error_for_log, unexpected_error_detail
 from mcpgateway.utils.log_sanitizer import sanitize_for_log
 from mcpgateway.utils.metadata_capture import MetadataCapture
 from mcpgateway.utils.oauth_resource import parse_oauth_resource_form
@@ -1066,7 +1067,8 @@ async def _parse_gateway_data_from_request(request: Request) -> dict[str, Any]:
                 data["tags"] = [tag.strip() for tag in data["tags"].split(",") if tag.strip()]
             return data
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {e}")
+            LOGGER.warning("Invalid JSON body: %s", e)
+            raise HTTPException(status_code=400, detail=safe_error_detail(e, "Invalid JSON body"))
 
     # Handle form data requests (multipart/form-data or application/x-www-form-urlencoded)
     elif "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
@@ -2418,7 +2420,7 @@ async def get_overview_partial(
         error_html = f"""
         <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded">
             <strong class="font-bold">Error loading overview:</strong>
-            <span class="block sm:inline">{html.escape(str(e))}</span>
+            <span class="block sm:inline">{html.escape(unexpected_error_detail(e))}</span>
         </div>
         """
         return HTMLResponse(content=error_html, status_code=500)
@@ -3248,7 +3250,7 @@ async def admin_add_server(request: Request, db: Session = Depends(get_db), user
         )
 
     except CoreValidationError as ex:
-        return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=422)
+        return ORJSONResponse(content=ErrorFormatter.format_validation_error(ex), status_code=422)
     except ServerNameConflictError as ex:
         return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=409)
     except ServerError as ex:
@@ -3409,7 +3411,8 @@ async def admin_edit_server(
     except ValueError as ex:
         return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=400)
     except RuntimeError as ex:
-        return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=500)
+        LOGGER.exception("Unexpected error in admin_edit_server")
+        return ORJSONResponse(content={"message": unexpected_error_detail(ex), "success": False}, status_code=500)
     except IntegrityError as ex:
         return ORJSONResponse(content=ErrorFormatter.format_database_error(ex), status_code=409)
     except PermissionError as e:
@@ -6066,7 +6069,7 @@ async def admin_list_teams(
 
     except Exception as e:
         LOGGER.error(f"Error listing teams for admin {user}: {e}")
-        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading teams: {html.escape(str(e))}</p></div>', status_code=200)
+        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading teams: {html.escape(unexpected_error_detail(e))}</p></div>', status_code=200)
 
 
 def _parse_form_max_members(raw: object) -> Optional[int]:
@@ -6178,13 +6181,13 @@ async def admin_create_team(
         if "UNIQUE constraint failed: email_teams.slug" in str(e):
             error_content = '<div class="text-red-500 p-3 bg-red-50 dark:bg-red-900/20 rounded-md">A team with this name already exists. Please choose a different name.</div>'
         else:
-            error_content = f'<div class="text-red-500 p-3 bg-red-50 dark:bg-red-900/20 rounded-md">Database error: {html.escape(str(e))}</div>'
+            error_content = f'<div class="text-red-500 p-3 bg-red-50 dark:bg-red-900/20 rounded-md">{html.escape(ErrorFormatter.format_database_error(e)["message"])}</div>'
         response = HTMLResponse(content=error_content, status_code=400)
         return response
     except Exception as e:
         LOGGER.error(f"Error creating team for admin {user}: {e}")
         response = HTMLResponse(
-            content=f'<div class="text-red-500 p-3 bg-red-50 dark:bg-red-900/20 rounded-md">Error creating team: {html.escape(str(e))}</div>',
+            content=f'<div class="text-red-500 p-3 bg-red-50 dark:bg-red-900/20 rounded-md">Error creating team: {html.escape(unexpected_error_detail(e))}</div>',
             status_code=400,
         )
         return response
@@ -6352,7 +6355,7 @@ async def admin_view_team_members(
 
     except Exception as e:
         LOGGER.error(f"Error viewing team members {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error loading members: {html.escape(str(e))}</div>', status_code=500)
+        return HTMLResponse(content=f'<div class="text-red-500">Error loading members: {html.escape(unexpected_error_detail(e))}</div>', status_code=500)
 
 
 @admin_router.get("/teams/{team_id}/members/add")
@@ -6488,7 +6491,7 @@ async def admin_add_team_members_view(
 
     except Exception as e:
         LOGGER.error(f"Error loading add members view for team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error loading add members view: {html.escape(str(e))}</div>', status_code=500)
+        return HTMLResponse(content=f'<div class="text-red-500">Error loading add members view: {html.escape(unexpected_error_detail(e))}</div>', status_code=500)
 
 
 @admin_router.get("/teams/{team_id}/edit")
@@ -6607,7 +6610,7 @@ async def admin_get_team_edit(
 
     except Exception as e:
         LOGGER.error(f"Error getting team edit form for {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error loading team: {html.escape(str(e))}</div>', status_code=500)
+        return HTMLResponse(content=f'<div class="text-red-500">Error loading team: {html.escape(unexpected_error_detail(e))}</div>', status_code=500)
 
 
 @admin_router.post("/teams/{team_id}/update")
@@ -6761,9 +6764,9 @@ async def admin_update_team(
         is_htmx = request.headers.get("HX-Request") == "true"
 
         if is_htmx:
-            return HTMLResponse(content=f'<div class="text-red-500">Error updating team: {html.escape(str(e))}</div>', status_code=500)
+            return HTMLResponse(content=f'<div class="text-red-500">Error updating team: {html.escape(unexpected_error_detail(e))}</div>', status_code=500)
         # For regular form submission, redirect to admin page with error parameter
-        error_msg = urllib.parse.quote(f"Error updating team: {str(e)}")
+        error_msg = urllib.parse.quote(f"Error updating team: {unexpected_error_detail(e)}")
         return RedirectResponse(url=f"{root_path}/admin/?error={error_msg}#teams", status_code=303)
 
 
@@ -6819,7 +6822,7 @@ async def admin_delete_team(
 
     except Exception as e:
         LOGGER.error(f"Error deleting team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error deleting team: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error deleting team: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/teams/{team_id}/add-member")
@@ -6953,7 +6956,7 @@ async def admin_add_team_members(
 
             except Exception as member_error:
                 LOGGER.error(f"Error processing {user_email} for team {team_id}: {member_error}")
-                errors.append(f"{user_email} ({str(member_error)})")
+                errors.append(f"{user_email} ({unexpected_error_detail(member_error)})")
 
         # 2. Handle removals - only remove members who were LOADED in the form AND unchecked
         # This prevents accidentally removing members from pages that weren't loaded yet (infinite scroll safety)
@@ -6982,7 +6985,7 @@ async def admin_add_team_members(
                 removed.append(existing_email)
             except Exception as removal_error:
                 LOGGER.error(f"Error removing {existing_email} from team {team_id}: {removal_error}")
-                errors.append(f"{existing_email} (removal failed: {str(removal_error)})")
+                errors.append(f"{existing_email} (removal failed: {unexpected_error_detail(removal_error)})")
 
         # Build result message
         result_parts = []
@@ -7039,7 +7042,7 @@ async def admin_add_team_members(
 
     except Exception as e:
         LOGGER.error(f"Error adding member(s) to team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error adding member(s): {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error adding member(s): {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/teams/{team_id}/update-member-role")
@@ -7115,7 +7118,7 @@ async def admin_update_team_member_role(
 
     except Exception as e:
         LOGGER.error(f"Error updating member role in team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error updating role: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error updating role: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/teams/{team_id}/remove-member")
@@ -7192,7 +7195,7 @@ async def admin_remove_team_member(
 
     except Exception as e:
         LOGGER.error(f"Error removing member from team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error removing member: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error removing member: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/teams/{team_id}/leave")
@@ -7260,7 +7263,7 @@ async def admin_leave_team(
 
     except Exception as e:
         LOGGER.error(f"Error leaving team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error leaving team: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error leaving team: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 # ============================================================================ #
@@ -7354,7 +7357,7 @@ async def admin_create_join_request(
         return HTMLResponse(content=f'<div class="text-red-500">{error_msg}</div>', status_code=400)
     except Exception as e:
         LOGGER.error(f"Error creating join request for team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error creating join request: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error creating join request: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.delete("/teams/{team_id}/join-request/{request_id}")
@@ -7414,7 +7417,7 @@ async def admin_cancel_join_request(
 
     except Exception as e:
         LOGGER.error(f"Error canceling join request {request_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error canceling join request: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error canceling join request: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.get("/teams/{team_id}/join-requests")
@@ -7503,7 +7506,7 @@ async def admin_list_join_requests(
 
     except Exception as e:
         LOGGER.error(f"Error listing join requests for team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error loading join requests: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error loading join requests: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/teams/{team_id}/join-requests/{request_id}/approve")
@@ -7557,7 +7560,7 @@ async def admin_approve_join_request(
         return HTMLResponse(content=f'<div class="text-red-500">Error approving join request: {html.escape(str(e))}</div>', status_code=400)
     except Exception as e:
         LOGGER.error(f"Error approving join request {request_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error approving join request: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error approving join request: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/teams/{team_id}/join-requests/{request_id}/reject")
@@ -7611,7 +7614,7 @@ async def admin_reject_join_request(
         return HTMLResponse(content=f'<div class="text-red-500">Error rejecting join request: {html.escape(str(e))}</div>', status_code=400)
     except Exception as e:
         LOGGER.error(f"Error rejecting join request {request_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error rejecting join request: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error rejecting join request: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 # ============================================================================ #
@@ -7965,7 +7968,7 @@ async def admin_users_partial_html(
 
     except Exception as e:
         LOGGER.error(f"Error loading users partial for admin {user}: {e}")
-        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading users: {html.escape(str(e))}</p></div>', status_code=200)
+        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading users: {html.escape(unexpected_error_detail(e))}</p></div>', status_code=200)
 
 
 @admin_router.get("/teams/{team_id}/members/partial", response_class=HTMLResponse)
@@ -8056,7 +8059,7 @@ async def admin_team_members_partial_html(
 
     except Exception as e:
         LOGGER.error(f"Error loading team members partial for team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading members: {html.escape(str(e))}</p></div>', status_code=200)
+        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading members: {html.escape(unexpected_error_detail(e))}</p></div>', status_code=200)
 
 
 @admin_router.get("/teams/{team_id}/non-members/partial", response_class=HTMLResponse)
@@ -8164,7 +8167,7 @@ async def admin_team_non_members_partial_html(
 
     except Exception as e:
         LOGGER.error(f"Error loading team non-members partial for team {team_id}: {e}")
-        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading non-members: {html.escape(str(e))}</p></div>', status_code=200)
+        return HTMLResponse(content=f'<div class="text-center py-8"><p class="text-red-500">Error loading non-members: {html.escape(unexpected_error_detail(e))}</p></div>', status_code=200)
 
 
 @admin_router.get("/users/search", response_class=JSONResponse)
@@ -8284,7 +8287,7 @@ async def admin_create_user(
 
     except Exception as e:
         LOGGER.error(f"Error creating user by admin {user}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error creating user: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error creating user: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.get("/users/{user_email}/edit")
@@ -8445,7 +8448,7 @@ async def admin_get_user_edit(
 
     except Exception as e:
         LOGGER.error(f"Error getting user edit form for {user_email}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error loading user: {html.escape(str(e))}</div>', status_code=500)
+        return HTMLResponse(content=f'<div class="text-red-500">Error loading user: {html.escape(unexpected_error_detail(e))}</div>', status_code=500)
 
 
 @admin_router.post("/users/{user_email}/update")
@@ -8532,7 +8535,7 @@ async def admin_update_user(
         return HTMLResponse(content=f'<div class="text-red-500">Password validation failed: {html.escape(str(exc))}</div>', status_code=400, headers={"HX-Retarget": "#edit-user-error"})
     except Exception as e:
         LOGGER.error(f"Error updating user {user_email}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error updating user: {html.escape(str(e))}</div>', status_code=400, headers={"HX-Retarget": "#edit-user-error"})
+        return HTMLResponse(content=f'<div class="text-red-500">Error updating user: {html.escape(unexpected_error_detail(e))}</div>', status_code=400, headers={"HX-Retarget": "#edit-user-error"})
 
 
 @admin_router.post("/users/{user_email}/activate")
@@ -8577,7 +8580,7 @@ async def admin_activate_user(
 
     except Exception as e:
         LOGGER.error(f"Error activating user {user_email}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error activating user: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error activating user: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/users/{user_email}/deactivate")
@@ -8622,7 +8625,7 @@ async def admin_deactivate_user(
 
     except Exception as e:
         LOGGER.error(f"Error deactivating user {user_email}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error deactivating user: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error deactivating user: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.delete("/users/{user_email}")
@@ -8674,7 +8677,7 @@ async def admin_delete_user(
 
     except Exception as e:
         LOGGER.error(f"Error deleting user {user_email}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error deleting user: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error deleting user: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.post("/users/{user_email}/unlock")
@@ -8712,7 +8715,7 @@ async def admin_unlock_user(
         return HTMLResponse(content=f'<div class="text-red-500">{html.escape(str(exc))}</div>', status_code=404)
     except Exception as exc:
         LOGGER.error("Error unlocking user %s: %s", user_email, exc)
-        return HTMLResponse(content=f'<div class="text-red-500">Error unlocking user: {html.escape(str(exc))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error unlocking user: {html.escape(unexpected_error_detail(exc))}</div>', status_code=400)
 
 
 @admin_router.post("/users/{user_email}/force-password-change")
@@ -8791,7 +8794,7 @@ async def admin_force_password_change(
         return HTMLResponse(content=f'<div class="text-red-500">{html.escape(str(exc))}</div>', status_code=404)
     except Exception as e:
         LOGGER.error(f"Error forcing password change for user {user_email}: {e}")
-        return HTMLResponse(content=f'<div class="text-red-500">Error forcing password change: {html.escape(str(e))}</div>', status_code=400)
+        return HTMLResponse(content=f'<div class="text-red-500">Error forcing password change: {html.escape(unexpected_error_detail(e))}</div>', status_code=400)
 
 
 @admin_router.get("/tools", response_model=PaginatedResponse)
@@ -12238,7 +12241,7 @@ async def admin_add_tool(
         return ORJSONResponse(content=ErrorFormatter.format_validation_error(ex), status_code=422)
     except Exception as ex:
         LOGGER.error(f"Unexpected error in admin_add_tool: {str(ex)}")
-        return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=500)
+        return ORJSONResponse(content={"message": unexpected_error_detail(ex), "success": False}, status_code=500)
 
 
 @admin_router.post("/tools/{tool_id}/edit/", response_model=None)
@@ -12682,7 +12685,6 @@ async def admin_discover_oauth(
     """
     # First-Party
     from mcpgateway.services.dcr_service import DcrService  # pylint: disable=import-outside-toplevel
-    from mcpgateway.utils.url_auth import sanitize_exception_message  # pylint: disable=import-outside-toplevel
 
     try:
         body = await request.json()
@@ -12750,7 +12752,7 @@ async def admin_discover_oauth(
         )
     except Exception as e:
         LOGGER.warning("OAuth discovery failed: %s", e)
-        sanitized = sanitize_exception_message(str(e))
+        sanitized = unexpected_error_detail(e)
         return JSONResponse(
             {
                 "success": False,
@@ -12812,7 +12814,8 @@ async def admin_add_gateway(
     except HTTPException:
         raise
     except Exception as e:
-        return ORJSONResponse(content={"message": f"Invalid request data: {e}", "success": False}, status_code=400)
+        LOGGER.warning("Invalid request data: %s", e)
+        return ORJSONResponse(content={"message": safe_error_detail(e, "Invalid request data"), "success": False}, status_code=400)
 
     team_id = data.get("team_id")
     if team_id and isinstance(team_id, str):
@@ -12844,7 +12847,7 @@ async def admin_add_gateway(
                     data["signing_algorithm"] = "ed25519"
                 except Exception as e:
                     LOGGER.error(f"Error signing CA certificate: {e}")
-                    raise RuntimeError("Failed to sign CA certificate") from e
+                    raise GatewayError("Failed to sign CA certificate") from e
             else:
                 # Explicitly set to None when signing is disabled
                 data["ca_certificate_sig"] = None
@@ -12859,13 +12862,12 @@ async def admin_add_gateway(
         gateway = GatewayCreate(**data)
 
     except ValidationError as ex:
-        # --- Getting only the custom message from the ValueError ---
-        error_ctx = [str(err.get("ctx", {}).get("error", err.get("msg", str(err)))) for err in ex.errors()]
-        return ORJSONResponse(content={"success": False, "message": "; ".join(error_ctx)}, status_code=422)
+        return ORJSONResponse(content=ErrorFormatter.format_validation_error(ex), status_code=422)
 
-    except RuntimeError as err:
+    except GatewayError as err:
+        LOGGER.exception("CA certificate signing failed in admin_add_gateway")
         # --- Getting only the custom message from the RuntimeError ---
-        error_ctx = [str(err)]
+        error_ctx = [unexpected_error_detail(err)]
         return ORJSONResponse(content={"success": False, "message": "; ".join(error_ctx)}, status_code=422)
 
     user_email = get_user_email(user)
@@ -12927,7 +12929,8 @@ async def admin_add_gateway(
     except GatewayToolNameConflictError as ex:
         return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=409)
     except RuntimeError as ex:
-        return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=500)
+        LOGGER.exception("Unexpected error in admin_add_gateway")
+        return ORJSONResponse(content={"message": unexpected_error_detail(ex), "success": False}, status_code=500)
     except ValidationError as ex:
         return ORJSONResponse(content=ErrorFormatter.format_validation_error(ex), status_code=422)
     # NOTE: Pydantic's ValidationError subclasses ValueError, so ValidationError must be handled first.
@@ -12939,7 +12942,7 @@ async def admin_add_gateway(
         return ORJSONResponse(content=ErrorFormatter.format_database_error(ex), status_code=400)
     except Exception as ex:
         LOGGER.exception(f"Unexpected error in admin_add_gateway: {ex}")
-        return ORJSONResponse(content={"message": "An unexpected error occurred. Please try again or contact support.", "success": False}, status_code=500)
+        return ORJSONResponse(content={"message": unexpected_error_detail(ex), "success": False}, status_code=500)
 
 
 # RESTful PUT endpoint for gateway updates (JSON/form-data support)
@@ -12982,7 +12985,8 @@ async def admin_update_gateway_rest(
     except HTTPException:
         raise
     except Exception as e:
-        return ORJSONResponse(content={"message": f"Invalid request data: {e}", "success": False}, status_code=400)
+        LOGGER.warning("Invalid request data: %s", e)
+        return ORJSONResponse(content={"message": safe_error_detail(e, "Invalid request data"), "success": False}, status_code=400)
 
     team_id = data.get("team_id")
     if team_id and isinstance(team_id, str):
@@ -13068,7 +13072,8 @@ async def admin_update_gateway_rest(
         if isinstance(ex, GatewayConnectionError):
             return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=502)
         if isinstance(ex, RuntimeError):
-            return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=500)
+            LOGGER.exception("Unexpected error in admin_update_gateway_rest")
+            return ORJSONResponse(content={"message": unexpected_error_detail(ex), "success": False}, status_code=500)
         if isinstance(ex, ValidationError):
             return ORJSONResponse(content=ErrorFormatter.format_validation_error(ex), status_code=422)
         if isinstance(ex, IntegrityError):
@@ -13354,7 +13359,8 @@ async def admin_edit_gateway(
         if isinstance(ex, GatewayConnectionError):
             return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=502)
         if isinstance(ex, RuntimeError):
-            return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=500)
+            LOGGER.exception("Unexpected error in admin_edit_gateway")
+            return ORJSONResponse(content={"message": unexpected_error_detail(ex), "success": False}, status_code=500)
         if isinstance(ex, ValidationError):
             return ORJSONResponse(content=ErrorFormatter.format_validation_error(ex), status_code=422)
         if isinstance(ex, IntegrityError):
@@ -15196,13 +15202,13 @@ async def admin_import_tools(
                 payload = await _read_request_json(request)
             except Exception as ex:
                 LOGGER.exception("Invalid JSON body")
-                return ORJSONResponse({"success": False, "message": f"Invalid JSON: {ex}"}, status_code=422)
+                return ORJSONResponse({"success": False, "message": safe_error_detail(ex, "Invalid JSON")}, status_code=422)
         else:
             try:
                 form = await request.form()
             except Exception as ex:
                 LOGGER.exception("Invalid form body")
-                return ORJSONResponse({"success": False, "message": f"Invalid form data: {ex}"}, status_code=422)
+                return ORJSONResponse({"success": False, "message": safe_error_detail(ex, "Invalid form data")}, status_code=422)
             # Check for file upload first
             if "tools_file" in form:
                 file = form["tools_file"]
@@ -15225,7 +15231,7 @@ async def admin_import_tools(
                     payload = orjson.loads(raw)
                 except Exception as ex:
                     LOGGER.exception("Invalid JSON in form field")
-                    return ORJSONResponse({"success": False, "message": f"Invalid JSON: {ex}"}, status_code=422)
+                    return ORJSONResponse({"success": False, "message": safe_error_detail(ex, "Invalid JSON")}, status_code=422)
 
         if not isinstance(payload, list):
             return ORJSONResponse({"success": False, "message": "Payload must be a JSON array of tools."}, status_code=422)
@@ -15262,20 +15268,22 @@ async def admin_import_tools(
                 try:
                     formatted = ErrorFormatter.format_database_error(ex)
                 except Exception:
-                    formatted = {"message": str(ex)}
+                    LOGGER.exception("Unexpected error in admin_import_tools")
+                    formatted = {"message": unexpected_error_detail(ex)}
                 errors.append({"index": i, "name": name, "error": formatted})
             except (ValidationError, CoreValidationError) as ex:
                 # Ditto: guard the formatter
                 try:
                     formatted = ErrorFormatter.format_validation_error(ex)
                 except Exception:
-                    formatted = {"message": str(ex)}
+                    LOGGER.exception("Unexpected error in admin_import_tools")
+                    formatted = {"message": unexpected_error_detail(ex)}
                 errors.append({"index": i, "name": name, "error": formatted})
             except ToolError as ex:
                 errors.append({"index": i, "name": name, "error": {"message": str(ex)}})
             except Exception as ex:
                 LOGGER.exception("Unexpected error importing tool %r at index %d", name, i)
-                errors.append({"index": i, "name": name, "error": {"message": str(ex)}})
+                errors.append({"index": i, "name": name, "error": {"message": unexpected_error_detail(ex)}})
 
         # Format response to match both frontend and test expectations
         response_data = {
@@ -15313,7 +15321,7 @@ async def admin_import_tools(
     except Exception as ex:
         # absolute catch-all: report instead of crashing
         LOGGER.exception("Fatal error in admin_import_tools")
-        return ORJSONResponse({"success": False, "message": str(ex)}, status_code=500)
+        return ORJSONResponse({"success": False, "message": unexpected_error_detail(ex)}, status_code=500)
 
 
 ####################
@@ -15818,7 +15826,7 @@ async def admin_stream_logs(
 
         except Exception as e:
             LOGGER.error(f"Error in log streaming: {e}")
-            yield f"event: error\ndata: {orjson.dumps({'error': str(e)}).decode()}\n\n"
+            yield f"event: error\ndata: {orjson.dumps({'error': unexpected_error_detail(e)}).decode()}\n\n"
 
     return StreamingResponse(
         generate(),
@@ -15914,7 +15922,7 @@ async def admin_get_log_file(
             raise HTTPException(403, _ACCESS_DENIED_MSG)
         except Exception as e:
             LOGGER.error("Error opening log file for download: %s", sanitize_for_log(e))
-            raise HTTPException(500, f"Error reading file for download: {e}")
+            raise HTTPException(500, f"Error reading file for download: {unexpected_error_detail(e)}")
 
         LOGGER.info(f"Serving log file download: {file_path.name} ({file_stat.st_size} bytes)")
 
@@ -16059,7 +16067,7 @@ async def admin_get_log_file(
 
     except Exception as e:
         LOGGER.error(f"Error listing log files: {e}")
-        raise HTTPException(500, f"Error listing log files: {e}")
+        raise HTTPException(500, f"Error listing log files: {unexpected_error_detail(e)}")
 
     return {
         "log_directory": str(log_dir),
@@ -16813,7 +16821,7 @@ async def admin_add_a2a_agent(
         )
 
     except CoreValidationError as ex:
-        return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=422)
+        return ORJSONResponse(content=ErrorFormatter.format_validation_error(ex), status_code=422)
     except A2AAgentNameConflictError as ex:
         LOGGER.error(f"A2A agent name conflict: {ex}")
         return ORJSONResponse(content={"message": str(ex), "success": False}, status_code=409)
@@ -17035,9 +17043,9 @@ async def admin_edit_a2a_agent(
         return ORJSONResponse({"message": "A2A agent updated successfully", "success": True}, status_code=200)
 
     except ValidationError as ve:
-        return ORJSONResponse({"message": str(ve), "success": False}, status_code=422)
+        return ORJSONResponse(ErrorFormatter.format_validation_error(ve), status_code=422)
     except IntegrityError as ie:
-        return ORJSONResponse({"message": str(ie), "success": False}, status_code=409)
+        return ORJSONResponse(ErrorFormatter.format_database_error(ie), status_code=409)
     except PermissionError as e:
         LOGGER.warning(
             "Permission denied for user %s editing A2A agent %s: %s",
@@ -17268,13 +17276,13 @@ async def admin_test_a2a_agent(
     except ValidationError as e:
         LOGGER.warning(f"Validation error testing A2A agent {agent_id}: {e}")
         return ORJSONResponse(
-            content={"success": False, "error": str(e), "error_type": "validation_error", "agent_id": agent_id},
+            content={"success": False, "error": ErrorFormatter.format_validation_error(e)["message"], "error_type": "validation_error", "agent_id": agent_id},
             status_code=422,
         )
     except Exception as e:
         LOGGER.error(f"Unexpected error testing A2A agent {agent_id}: {e}")
         return ORJSONResponse(
-            content={"success": False, "error": str(e), "error_type": "internal_error", "agent_id": agent_id},
+            content={"success": False, "error": unexpected_error_detail(e), "error_type": "internal_error", "agent_id": agent_id},
             status_code=500,
         )
 
@@ -17632,7 +17640,7 @@ async def get_resources_section(
 
     except Exception as e:
         LOGGER.error(f"Error loading resources section: {e}")
-        return ORJSONResponse(content={"error": str(e)}, status_code=500)
+        return ORJSONResponse(content={"error": unexpected_error_detail(e)}, status_code=500)
 
 
 @admin_router.get("/sections/prompts")
@@ -17691,7 +17699,7 @@ async def get_prompts_section(
 
     except Exception as e:
         LOGGER.error(f"Error loading prompts section: {e}")
-        return ORJSONResponse(content={"error": str(e)}, status_code=500)
+        return ORJSONResponse(content={"error": unexpected_error_detail(e)}, status_code=500)
 
 
 @admin_router.get("/sections/servers")
@@ -17750,7 +17758,7 @@ async def get_servers_section(
 
     except Exception as e:
         LOGGER.error(f"Error loading servers section: {e}")
-        return ORJSONResponse(content={"error": str(e)}, status_code=500)
+        return ORJSONResponse(content={"error": unexpected_error_detail(e)}, status_code=500)
 
 
 @admin_router.get("/sections/gateways")
@@ -17810,7 +17818,7 @@ async def get_gateways_section(
 
     except Exception as e:
         LOGGER.error(f"Error loading gateways section: {e}")
-        return ORJSONResponse(content={"error": str(e)}, status_code=500)
+        return ORJSONResponse(content={"error": unexpected_error_detail(e)}, status_code=500)
 
 
 ####################
@@ -17860,7 +17868,7 @@ async def get_plugins_partial(request: Request, db: Session = Depends(get_db), u
         error_html = f"""
         <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             <strong class="font-bold">Error loading plugins:</strong>
-            <span class="block sm:inline">{html.escape(str(e))}</span>
+            <span class="block sm:inline">{html.escape(unexpected_error_detail(e))}</span>
         </div>
         """
         return HTMLResponse(content=error_html, status_code=500)
@@ -17898,7 +17906,7 @@ async def get_a2a_plugin_bindings_partial(
         error_html = f"""
         <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             <strong class="font-bold">Error loading A2A plugin bindings:</strong>
-            <span class="block sm:inline">{html.escape(str(e))}</span>
+            <span class="block sm:inline">{html.escape(unexpected_error_detail(e))}</span>
         </div>
         """
         return HTMLResponse(content=error_html, status_code=500)
@@ -17996,7 +18004,7 @@ async def admin_create_a2a_plugin_binding(
     except Exception as e:
         LOGGER.error(f"Error creating A2A plugin binding: {e}")
         return HTMLResponse(
-            content=f'<div class="bg-red-50 p-4 rounded text-red-700">Error: {html.escape(str(e))}</div>',
+            content=f'<div class="bg-red-50 p-4 rounded text-red-700">Error: {html.escape(unexpected_error_detail(e))}</div>',
             status_code=500,
         )
 
@@ -18048,7 +18056,7 @@ async def admin_delete_a2a_plugin_binding(
     except Exception as e:
         LOGGER.error(f"Error deleting A2A plugin binding {binding_id}: {e}")
         return HTMLResponse(
-            content=f'<div class="bg-red-50 p-4 rounded text-red-700">Error: {html.escape(str(e))}</div>',
+            content=f'<div class="bg-red-50 p-4 rounded text-red-700">Error: {html.escape(unexpected_error_detail(e))}</div>',
             status_code=500,
         )
 
@@ -19198,7 +19206,7 @@ async def save_observability_query(
     except Exception as e:
         db.rollback()
         LOGGER.error(f"Failed to save query: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=unexpected_error_detail(e))
     finally:
         # Ensure close() always runs even if commit() fails
         try:
@@ -19370,7 +19378,7 @@ async def update_observability_query(
     except Exception as e:
         db.rollback()
         LOGGER.error(f"Failed to update query: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=unexpected_error_detail(e))
     finally:
         # Ensure close() always runs even if commit() fails
         try:
@@ -19455,7 +19463,7 @@ async def track_query_usage(request: Request, query_id: int, user=Depends(get_cu
     except Exception as e:
         db.rollback()
         LOGGER.error(f"Failed to track query usage: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=unexpected_error_detail(e))
     finally:
         # Ensure close() always runs even if commit() fails
         try:
