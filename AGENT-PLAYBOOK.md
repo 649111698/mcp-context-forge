@@ -64,7 +64,10 @@
    # 按本次改动选相关测试目录，外加 fork 自有测试：
    #   tests/unit/mcpgateway/services/test_tool_api_source_service.py
    #   tests/unit/mcpgateway/routers/ tests/unit/mcpgateway/services/ 中被改动的文件
-   DATABASE_URL="sqlite:///./mcp.db" uv run python -c "import mcpgateway.main; print('IMPORT_OK')"
+   # ⚠️ 2026-10-10 起上游(#7180)启动即拒绝 __REPLACE_ME__ 占位符密钥，冒烟必须带真实 JWT_SECRET_KEY
+   source .env.aliyun.local
+   DATABASE_URL="sqlite:///./mcp.db" JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+     uv run python -c "import mcpgateway.main; print('IMPORT_OK')"
    ```
    已知问题（**预存在，不要修也不要慌**）：`tests/unit/mcpgateway/test_main.py` 与 `tests/e2e/test_gateway_async_lifecycle.py` 在同一批执行时后者会 3 failed（test_main 状态污染），单独跑全过。
 4. **构建镜像**（完整 overlay 配方，逐坑试出来的，别改）：
