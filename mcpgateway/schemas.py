@@ -6567,6 +6567,22 @@ class AdminCreateUserRequest(BaseModel):
     password_change_required: bool = Field(False, description="Whether user must change password on next login")
 
 
+class AdminCreateSSOUserRequest(BaseModel):
+    """Administrator-driven passwordless SSO user creation request.
+
+    Providers are validated against enabled provider rows by the service. The
+    endpoint rejects a password key before validating this schema.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    email: EmailStr = Field(..., description="User's email address")
+    auth_provider: str = Field(..., description="Configured SSO provider ID; azure-ad is an alias for entra")
+    full_name: Optional[str] = Field(None, max_length=255, description="User's full name")
+    is_admin: bool = Field(False, description="Grant admin privileges to user")
+    is_active: bool = Field(True, description="Whether user account is active")
+
+
 # Deprecated alias — use AdminCreateUserRequest or PublicRegistrationRequest instead
 EmailRegistrationRequest = AdminCreateUserRequest
 
@@ -9200,7 +9216,6 @@ class HealthCheckResponse(BaseModel):
 
     status: str = Field(..., description="Overall health status: 'healthy' if all components are healthy, 'unhealthy' otherwise")
     status_items: List[HealthStatusItem] = Field(..., description="List of component health statuses")
-    mcp_runtime: Dict[str, Any] = Field(default_factory=dict, description="MCP runtime diagnostics and configuration")
 
 
 class GunicornMetricsSchema(BaseModel):
