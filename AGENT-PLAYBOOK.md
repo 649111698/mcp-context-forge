@@ -36,8 +36,12 @@
 
 - 本地网关：`docker compose --env-file .env.aliyun.local -f docker-compose.aliyun.yml up -d`，端口 **4447**
   - 容器名 `mcp-hub-gateway`；换镜像时先 `docker rm -f mcp-hub-gateway` 再 up（compose 项目标签不一致，直接 up 会重名冲突）
-- 依赖容器：Postgres `mcp-context-forge-postgres-1`（宿主 5433，库 mcp_e2e）、Redis `mcp-hub-redis`（6380）
+- 依赖容器：Postgres `mcp-context-forge-postgres-1`（宿主 5433，库 mcp_e2e，数据卷 `mcp-context-forge_pgdata`）、Redis `mcp-hub-redis`（6380）
   - 两个容器已设 `--restart unless-stopped`（2026-09-22 起）。若发现它们 Exited，`docker start` 两个即可——网关启动会卡在 redis_isready/db_isready 探测上，症状是容器一直 starting、health 000
+  - ⚠️ Postgres 是 **postgres:18**，PGDATA 布局是新式 `/var/lib/postgresql/18/docker`（卷根下有 `18/` 子目录）。若 Docker 被 prune/清空导致容器消失，用原镜像重建（卷数据不会丢）：
+    `docker run -d --name mcp-context-forge-postgres-1 --restart unless-stopped -p 5433:5432 -e POSTGRES_PASSWORD=mysecretpassword -e POSTGRES_DB=mcp_e2e -v mcp-context-forge_pgdata:/var/lib/postgresql postgres:18`
+    （挂载点是 `/var/lib/postgresql` 不是 `.../data`；用 postgres:17 及以下会因目录非空 initdb 失败进重启循环）
+  - Redis 重建：`docker run -d --name mcp-hub-redis --restart unless-stopped -p 6380:6379 redis:7`（无状态）
 - 敏感文件（**永不提交**）：`.env.aliyun.local`（DATABASE_URL/JWT_SECRET_KEY/IMAGE_TAG/DEFAULT_USER_PASSWORD 等）、`.deploy-credentials.txt`
 - macOS 本机 venv 装不了 psycopg-c（无 libpq），**导入冒烟必须覆盖** `DATABASE_URL="sqlite:///./mcp.db"`
 
