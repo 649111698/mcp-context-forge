@@ -3680,6 +3680,44 @@ class Tool(Base):
         )
 
 
+class ToolApiSource(Base):
+    """
+    ORM model for a saved MCP API tool definition used for repeatable tool sync.
+
+    Stores the raw tool JSON (a single tool definition or an array of tool
+    definitions). Syncing a source upserts tools by name: an existing tool
+    with the same name is overwritten with the stored definition, otherwise a
+    new tool is registered. This lets administrators update tool JSON in one
+    place and re-apply it after gateway upgrades or re-imports instead of
+    pasting the JSON into the import dialog every time.
+    """
+
+    __tablename__ = "tool_api_sources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Remote mode: fetch tool JSON from this URL on sync (None = manual JSON mode)
+    source_url: Mapped[Optional[str]] = mapped_column(String(767), nullable=True)
+    # HTTP method for the fetch: "GET" or "POST"
+    fetch_method: Mapped[Optional[str]] = mapped_column(String(10), default="GET", nullable=False)
+    # JSON request body sent when fetch_method is POST
+    request_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Simple auth for the fetch: "none" | "bearer" | "basic" | "header"
+    auth_type: Mapped[Optional[str]] = mapped_column(String(20), default="none", nullable=False)
+    auth_header_key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Encrypted at rest via services_auth.encode_auth; never rendered back to the UI
+    auth_credential: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Manual JSON, or the last-fetched snapshot for remote sources
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    owner_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class Resource(Base):
     """
     ORM model for a registered Resource.

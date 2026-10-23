@@ -18,7 +18,7 @@
       href="{{ root_path }}/static/favicon.ico"
     />
     <!-- Tailwind CSS - Using precompiled CSS for strict CSP compliance -->
-    <link rel="stylesheet" href="{{ root_path }}/static/css/tailwind.min.css" />
+    <link rel="stylesheet" href="{{ root_path }}/static/css/tailwind.min.css?v=8" />
     <!-- Custom animations - Previously defined via inline Tailwind config, now external for CSP compliance -->
     <link rel="stylesheet" href="{{ root_path }}/static/css/auth-animations.css" />
     <!-- HTMX is now bundled in the main JS bundle -->
@@ -169,7 +169,7 @@
     {% for css_file in bundle_css %}
     <link rel="stylesheet" href="{{ root_path }}/static/{{ css_file }}" />
     {% endfor %}
-    <link href="{{ root_path }}/static/admin.css" rel="stylesheet" />
+    <link href="{{ root_path }}/static/admin.css?v=8" rel="stylesheet" />
     <link href="{{ root_path }}/static/gantt-chart.css" rel="stylesheet" />
     <link href="{{ root_path }}/static/flame-graph.css" rel="stylesheet" />
     <style>
@@ -307,6 +307,13 @@
                data-action-click="showTab" data-arg0="tools">
               <span class="sidebar-icon text-lg" :class="{ 'mr-3': !sidebarCollapsed }">🛠️</span>
               <span x-show="!sidebarCollapsed">Tools</span>
+            </a>
+            <a href="#tool-apis" id="tab-tool-apis" data-testid="tool-apis-tab"
+               class="sidebar-link group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors"
+               :class="{ 'justify-center': sidebarCollapsed }"
+               data-action-click="showTab" data-arg0="tool-apis">
+              <span class="sidebar-icon text-lg" :class="{ 'mr-3': !sidebarCollapsed }">🔌</span>
+              <span x-show="!sidebarCollapsed">MCP APIs</span>
             </a>
             {% if toolops_enabled %}
             <a href="#tool-ops" id="tab-tool-ops" data-testid="tool-ops-tab"
@@ -2767,7 +2774,7 @@
                   />
                   <div
                     id="associatedTools"
-                    class="max-h-60 overflow-y-auto rounded-md border border-gray-300 dark:border-gray-700 shadow-sm p-3 bg-gray-50 dark:bg-gray-900"
+                    class="max-h-96 overflow-y-auto rounded-md border border-gray-300 dark:border-gray-700 shadow-sm p-3 bg-gray-50 dark:bg-gray-900"
                     hx-get="{{ root_path }}/admin/tools/partial?page=1&per_page=50&render=selector{% if selected_team_id %}&team_id={{ selected_team_id }}{% endif %}"
                     hx-trigger="load"
                     hx-swap="innerHTML"
@@ -3952,6 +3959,22 @@
           </form>
         </div>
         {% endif %}
+      </div>
+      <!-- MCP APIs Panel: saved tool JSON definitions with one-click sync -->
+      <div id="tool-apis-panel" class="tab-panel hidden">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h2 class="text-2xl font-bold dark:text-gray-200">MCP APIs</h2>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              已保存的 MCP API 工具定义。同步会应用到工具目录：同名 <strong>工具</strong> 被覆盖，未知名称会新建。定义保存一次，JSON 变更后重新同步即可，无需反复导入。
+            </p>
+          </div>
+        </div>
+        <div id="tool-apis-content"
+             hx-get="{{ root_path }}/admin/tool-apis/partial"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+        </div>
       </div>
       {% if toolops_enabled %}
       <div id="tool-ops-panel" class="tab-panel hidden">
@@ -11347,8 +11370,8 @@ class="fixed z-40 inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-ce
                       />
                       <div
                         id="edit-server-tools"
-                        class="max-h-60 overflow-y-auto rounded-md border border-gray-600 shadow-sm p-3 bg-gray-50 dark:bg-gray-900"
-                        hx-get="{{ root_path }}/admin/tools/partial?page=1&per_page=20&render=selector{% if selected_team_id %}&team_id={{ selected_team_id }}{% endif %}"
+                        class="max-h-96 overflow-y-auto rounded-md border border-gray-600 shadow-sm p-3 bg-gray-50 dark:bg-gray-900"
+                        hx-get="{{ root_path }}/admin/tools/partial?page=1&per_page=50&render=selector{% if selected_team_id %}&team_id={{ selected_team_id }}{% endif %}"
                         hx-trigger="load"
                         hx-swap="innerHTML"
                       >
@@ -15022,32 +15045,37 @@ class="fixed z-40 inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-ce
       window.Admin.closeRoleAssignmentModal = closeRoleAssignmentModal;
       window.Admin.toggleEmailInput = toggleEmailInput;
       window.Admin.validateNewUserPassword = validateNewUserPassword;
-      if (typeof openBulkImportModal !== 'undefined') window.Admin.openBulkImportModal = openBulkImportModal;
-      if (typeof closeBulkImportModal !== 'undefined') window.Admin.closeBulkImportModal = closeBulkImportModal;
-      if (typeof toggleImportMethod !== 'undefined') window.Admin.toggleImportMethod = toggleImportMethod;
-      if (typeof handleFileSelect !== 'undefined') window.Admin.handleFileSelect = handleFileSelect;
-      if (typeof validateJsonInput !== 'undefined') window.Admin.validateJsonInput = validateJsonInput;
-      if (typeof toggleValidationGuide !== 'undefined') window.Admin.toggleValidationGuide = toggleValidationGuide;
-      if (typeof togglePreviewDetails !== 'undefined') window.Admin.togglePreviewDetails = togglePreviewDetails;
-      if (typeof submitBulkImport !== 'undefined') window.Admin.submitBulkImport = submitBulkImport;
-      if (typeof toggleBulkImportDropdown !== 'undefined') window.Admin.toggleBulkImportDropdown = toggleBulkImportDropdown;
-      if (typeof toggleDropdownImportMethod !== 'undefined') window.Admin.toggleDropdownImportMethod = toggleDropdownImportMethod;
-      if (typeof handleDropdownFileSelect !== 'undefined') window.Admin.handleDropdownFileSelect = handleDropdownFileSelect;
-      if (typeof validateDropdownJson !== 'undefined') window.Admin.validateDropdownJson = validateDropdownJson;
-      if (typeof validateDropdownData !== 'undefined') window.Admin.validateDropdownData = validateDropdownData;
-      if (typeof showDropdownStatus !== 'undefined') window.Admin.showDropdownStatus = showDropdownStatus;
-      if (typeof showDropdownResults !== 'undefined') window.Admin.showDropdownResults = showDropdownResults;
-      if (typeof showDropdownFailedTools !== 'undefined') window.Admin.showDropdownFailedTools = showDropdownFailedTools;
-      if (typeof showDropdownActionButtons !== 'undefined') window.Admin.showDropdownActionButtons = showDropdownActionButtons;
-      if (typeof resetDropdownImport !== 'undefined') window.Admin.resetDropdownImport = resetDropdownImport;
-      if (typeof submitDropdownImport !== 'undefined') window.Admin.submitDropdownImport = submitDropdownImport;
-      if (typeof performDropdownImport !== 'undefined') window.Admin.performDropdownImport = performDropdownImport;
-      if (typeof downloadSampleJSON !== 'undefined') window.Admin.downloadSampleJSON = downloadSampleJSON;
-      if (typeof openCreateTeamModal !== 'undefined') window.Admin.openCreateTeamModal = openCreateTeamModal;
-      if (typeof closeCreateTeamModal !== 'undefined') window.Admin.closeCreateTeamModal = closeCreateTeamModal;
-      if (typeof loadTeamMembersView !== 'undefined') window.Admin.loadTeamMembersView = loadTeamMembersView;
-      if (typeof approveJoinRequest !== 'undefined') window.Admin.approveJoinRequest = approveJoinRequest;
-      if (typeof rejectJoinRequest !== 'undefined') window.Admin.rejectJoinRequest = rejectJoinRequest;
+      // These helpers are defined inside a DOMContentLoaded callback in an earlier
+      // script block, so they do not exist yet at parse time — register them after
+      // the DOM (and their definitions) are ready.
+      document.addEventListener('DOMContentLoaded', function () {
+        if (typeof openBulkImportModal !== 'undefined') window.Admin.openBulkImportModal = openBulkImportModal;
+        if (typeof closeBulkImportModal !== 'undefined') window.Admin.closeBulkImportModal = closeBulkImportModal;
+        if (typeof toggleImportMethod !== 'undefined') window.Admin.toggleImportMethod = toggleImportMethod;
+        if (typeof handleFileSelect !== 'undefined') window.Admin.handleFileSelect = handleFileSelect;
+        if (typeof validateJsonInput !== 'undefined') window.Admin.validateJsonInput = validateJsonInput;
+        if (typeof toggleValidationGuide !== 'undefined') window.Admin.toggleValidationGuide = toggleValidationGuide;
+        if (typeof togglePreviewDetails !== 'undefined') window.Admin.togglePreviewDetails = togglePreviewDetails;
+        if (typeof submitBulkImport !== 'undefined') window.Admin.submitBulkImport = submitBulkImport;
+        if (typeof toggleBulkImportDropdown !== 'undefined') window.Admin.toggleBulkImportDropdown = toggleBulkImportDropdown;
+        if (typeof toggleDropdownImportMethod !== 'undefined') window.Admin.toggleDropdownImportMethod = toggleDropdownImportMethod;
+        if (typeof handleDropdownFileSelect !== 'undefined') window.Admin.handleDropdownFileSelect = handleDropdownFileSelect;
+        if (typeof validateDropdownJson !== 'undefined') window.Admin.validateDropdownJson = validateDropdownJson;
+        if (typeof validateDropdownData !== 'undefined') window.Admin.validateDropdownData = validateDropdownData;
+        if (typeof showDropdownStatus !== 'undefined') window.Admin.showDropdownStatus = showDropdownStatus;
+        if (typeof showDropdownResults !== 'undefined') window.Admin.showDropdownResults = showDropdownResults;
+        if (typeof showDropdownFailedTools !== 'undefined') window.Admin.showDropdownFailedTools = showDropdownFailedTools;
+        if (typeof showDropdownActionButtons !== 'undefined') window.Admin.showDropdownActionButtons = showDropdownActionButtons;
+        if (typeof resetDropdownImport !== 'undefined') window.Admin.resetDropdownImport = resetDropdownImport;
+        if (typeof submitDropdownImport !== 'undefined') window.Admin.submitDropdownImport = submitDropdownImport;
+        if (typeof performDropdownImport !== 'undefined') window.Admin.performDropdownImport = performDropdownImport;
+        if (typeof downloadSampleJSON !== 'undefined') window.Admin.downloadSampleJSON = downloadSampleJSON;
+        if (typeof openCreateTeamModal !== 'undefined') window.Admin.openCreateTeamModal = openCreateTeamModal;
+        if (typeof closeCreateTeamModal !== 'undefined') window.Admin.closeCreateTeamModal = closeCreateTeamModal;
+        if (typeof loadTeamMembersView !== 'undefined') window.Admin.loadTeamMembersView = loadTeamMembersView;
+        if (typeof approveJoinRequest !== 'undefined') window.Admin.approveJoinRequest = approveJoinRequest;
+        if (typeof rejectJoinRequest !== 'undefined') window.Admin.rejectJoinRequest = rejectJoinRequest;
+      });
     </script>
         </main>
       </div>

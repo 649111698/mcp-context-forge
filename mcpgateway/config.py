@@ -3749,7 +3749,7 @@ Disallow: /
     strict_scheme_enforcement: bool = False
 
     # Character validation patterns
-    validation_name_pattern: str = r"^[a-zA-Z0-9_.\- ]+$"  # Allow spaces for names (literal space, not \s to reject control chars)
+    validation_name_pattern: str = r"^[\w.\- ]+$"  # Unicode letters/digits plus ._- and space (\w is Unicode-aware so CJK names pass; HTML chars still blocked by the dedicated check)
     validation_identifier_pattern: str = r"^[a-zA-Z0-9_\-\.]+$"  # No spaces for IDs
     validation_safe_uri_pattern: str = r"^[a-zA-Z0-9_\-.:/?=&%{}]+$"
     validation_unsafe_uri_pattern: str = r'[<>"\'\\]'

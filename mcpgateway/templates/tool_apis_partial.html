@@ -1,0 +1,293 @@
+<!-- htmlhint doctype-first:false -->
+{% if refresh_tools_table %}
+<!-- Hidden reloader: refreshes the tools table after tool-affecting operations -->
+<div class="hidden" hx-get="{{ root_path }}/admin/tools/partial?page=1" hx-target="#tools-table" hx-swap="outerHTML" hx-trigger="load"></div>
+{% endif %}
+
+{% if message %}
+<div class="mb-4 rounded-lg border px-4 py-2.5 text-sm {{ 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300' if message_is_error else 'border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300' }}" role="status">
+  {{ message }}
+</div>
+{% endif %}
+
+{% if form_mode %}
+<div class="bg-white shadow rounded-lg p-6 mb-6 dark:bg-gray-800">
+  <form hx-post="{{ root_path }}/admin/tool-apis/save" hx-target="#tool-apis-content" hx-swap="innerHTML" class="space-y-4">
+    <input type="hidden" name="source_id" value="{{ form_source.id if form_source else '' }}" />
+    <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">{{ '编辑 MCP API' if form_source else '新增 MCP API' }}</h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label for="tool-api-display-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">名称</label>
+        <input
+          type="text"
+          id="tool-api-display-name"
+          name="display_name"
+          value="{{ form_values.get('display_name', '') }}"
+          placeholder="如：金蝶AI工具组（留空自动取第一个 tool 名）"
+          class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+        />
+      </div>
+      <div>
+        <label for="tool-api-description" class="block text-sm font-medium text-gray-700 dark:text-gray-300">描述</label>
+        <input
+          type="text"
+          id="tool-api-description"
+          name="description"
+          value="{{ form_values.get('description', '') }}"
+          placeholder="可选备注"
+          class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+        />
+      </div>
+    </div>
+
+    <!-- Remote fetch: URL + simple auth -->
+    <div class="border border-gray-200 dark:border-gray-700 rounded-md p-4 space-y-3">
+      <p class="text-sm font-medium text-gray-700 dark:text-gray-300">从 URL 拉取（可选）</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">填写后每次同步都会重新从该地址拉取 tool JSON；留空则使用下方手动粘贴的 JSON。</p>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="md:col-span-2">
+          <label for="tool-api-source-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">来源 URL</label>
+          <input
+            type="text"
+            id="tool-api-source-url"
+            name="source_url"
+            value="{{ form_values.get('source_url', '') }}"
+            placeholder="https://your-server/tools.json"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+          />
+        </div>
+        <div>
+          <label for="tool-api-fetch-method" class="block text-sm font-medium text-gray-700 dark:text-gray-300">请求方法</label>
+          <select
+            id="tool-api-fetch-method"
+            name="fetch_method"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+          >
+            <option value="GET" {% if form_values.get('fetch_method', 'GET') == 'GET' %}selected{% endif %}>GET</option>
+            <option value="POST" {% if form_values.get('fetch_method') == 'POST' %}selected{% endif %}>POST</option>
+          </select>
+        </div>
+        <div>
+          <label for="tool-api-auth-type" class="block text-sm font-medium text-gray-700 dark:text-gray-300">鉴权方式</label>
+          <select
+            id="tool-api-auth-type"
+            name="auth_type"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+          >
+            <option value="none" {% if form_values.get('auth_type', 'none') == 'none' %}selected{% endif %}>无</option>
+            <option value="bearer" {% if form_values.get('auth_type') == 'bearer' %}selected{% endif %}>Bearer Token</option>
+            <option value="basic" {% if form_values.get('auth_type') == 'basic' %}selected{% endif %}>Basic（用户名:密码）</option>
+            <option value="header" {% if form_values.get('auth_type') == 'header' %}selected{% endif %}>自定义 Header</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label for="tool-api-request-body" class="block text-sm font-medium text-gray-700 dark:text-gray-300">请求 Body（POST 时的 JSON）</label>
+          <textarea
+            id="tool-api-request-body"
+            name="request_body"
+            rows="3"
+            spellcheck="false"
+            placeholder='{ "group": "ai", "baseUrl": "http://..." }'
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs font-mono leading-relaxed"
+          >{{ form_values.get('request_body', '') }}</textarea>
+        </div>
+        <div class="space-y-4">
+        <div>
+          <label for="tool-api-auth-credential" class="block text-sm font-medium text-gray-700 dark:text-gray-300">凭据{{ '（已保存，留空保持不变）' if form_source and form_source.has_credential else '' }}</label>
+          <input
+            type="password"
+            id="tool-api-auth-credential"
+            name="auth_credential"
+            autocomplete="new-password"
+            placeholder="{{ '••••••' if form_source and form_source.has_credential else 'Token / 用户名:密码 / Header 值' }}"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+          />
+        </div>
+        <div>
+          <label for="tool-api-auth-header-key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Header 名称（仅自定义 Header 方式）</label>
+          <input
+            type="text"
+            id="tool-api-auth-header-key"
+            name="auth_header_key"
+            value="{{ form_values.get('auth_header_key', '') }}"
+            placeholder="X-Api-Key"
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+          />
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between">
+        <label for="tool-api-content" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Tool JSON{{ '（URL 模式下为最近一次拉取内容）' if form_values.get('source_url') else '' }}</label>
+      </div>
+      <textarea
+        id="tool-api-content"
+        name="content"
+        rows="14"
+        spellcheck="false"
+        placeholder='{ "name": "queryCustomer", "url": "https://...", "integration_type": "REST", "request_type": "POST", "input_schema": { ... }, "output_schema": { ... } }'
+        class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm font-mono leading-relaxed"
+      >{{ form_values.get('content', '') }}</textarea>
+    </div>
+    <div class="flex items-center">
+      <input
+        type="checkbox"
+        id="tool-api-enabled"
+        name="enabled"
+        {% if form_values.get('enabled', true) %}checked{% endif %}
+        class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+      />
+      <label for="tool-api-enabled" class="ml-2 text-sm text-gray-700 dark:text-gray-300">计入「全部同步」</label>
+    </div>
+    <div class="flex items-center space-x-3 pt-2">
+      <button
+        type="submit"
+        name="action"
+        value="save_and_sync"
+        class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+      >
+        {{ '保存并同步' if form_source else '保存并同步' }}
+      </button>
+      <button
+        type="submit"
+        name="action"
+        value="save"
+        class="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+      >
+        仅保存
+      </button>
+      <button
+        type="button"
+        hx-get="{{ root_path }}/admin/tool-apis/partial"
+        hx-target="#tool-apis-content"
+        hx-swap="innerHTML"
+        class="py-2 px-4 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 focus:outline-none"
+      >
+        取消
+      </button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="flex justify-between items-center mb-3">
+  <p class="text-xs text-gray-500 dark:text-gray-400">
+    已保存 {{ rows|length }} 个 API —— 同步按名称覆盖同名工具，未知名称会新建。
+  </p>
+  <div class="flex items-center space-x-2">
+    <button
+      type="button"
+      hx-get="{{ root_path }}/admin/tool-apis/partial?form=new"
+      hx-target="#tool-apis-content"
+      hx-swap="innerHTML"
+      class="inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+    >
+      + 新增 API
+    </button>
+    {% if rows %}
+    <button
+      type="button"
+      hx-post="{{ root_path }}/admin/tool-apis/sync-all"
+      hx-target="#tool-apis-content"
+      hx-swap="innerHTML"
+      hx-confirm="确认同步所有已启用的 API？同名工具将被覆盖。"
+      class="inline-flex items-center py-2 px-4 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-indigo-600 dark:text-indigo-400 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+    >
+      ⟳ 全部同步
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="bg-white shadow rounded-lg p-6 mb-8 dark:bg-gray-800">
+  <div id="tool-apis-table-wrapper" class="overflow-x-auto">
+    <table id="tool-apis-table" class="w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
+      <thead class="bg-gray-50 dark:bg-gray-700">
+        <tr>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-36">名称</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-14">工具数</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400">来源</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-20 hidden min-[1340px]:table-cell">状态</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-32 hidden min-[1250px]:table-cell">最近同步</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-36">结果</th>
+          <th class="px-3 py-2.5 text-left text-[12px] font-medium text-gray-500 dark:text-gray-400 w-44">操作</th>
+        </tr>
+      </thead>
+      <tbody class="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-700">
+        {% for row in rows %}
+        <tr class="transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+          <td class="px-3 py-2.5 text-sm text-gray-900 dark:text-gray-200 truncate align-middle" title="{{ row.display_name }}">
+            <span class="font-medium">{{ row.display_name }}</span>
+            {% if row.description %}
+            <span class="block text-xs text-gray-400 truncate" title="{{ row.description }}">{{ row.description }}</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2.5 text-sm text-gray-600 dark:text-gray-300 align-middle" title="{{ row.summary.names|join(', ') }}">
+            {{ row.summary.tool_count if not row.summary.error else '—' }}
+          </td>
+          <td class="px-3 py-2.5 align-middle">
+            {% if row.source_url %}
+            <span class="block text-xs text-gray-600 dark:text-gray-300 truncate font-mono" title="{{ row.source_url }}">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 mr-1 align-middle">{{ row.fetch_method or 'GET' }}</span>{{ row.source_url }}
+            </span>
+            <span class="text-[11px] text-gray-400">
+              {% if row.auth_type == 'bearer' %}Bearer{% elif row.auth_type == 'basic' %}Basic{% elif row.auth_type == 'header' %}Header{{ ' · ' + row.auth_header_key if row.auth_header_key }}{% else %}无鉴权{% endif %}
+            </span>
+            {% else %}
+            <span class="text-xs text-gray-500 dark:text-gray-400 truncate font-mono" title="{{ row.summary.first_url if not row.summary.error else row.summary.error }}">{{ row.summary.first_url if not row.summary.error else row.summary.error }}</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2.5 text-xs align-middle hidden min-[1340px]:table-cell">
+            {% if row.enabled %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">已启用</span>
+            {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">已暂停</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap align-middle hidden min-[1250px]:table-cell">
+            {{ row.last_synced_at.strftime('%Y-%m-%d %H:%M') if row.last_synced_at else '从未' }}
+          </td>
+          <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 truncate align-middle" title="{{ row.last_sync_result or '' }}">
+            {{ row.last_sync_result or '—' }}
+          </td>
+          <td class="px-3 py-2.5 text-sm font-medium whitespace-nowrap align-middle">
+            <button
+              type="button"
+              hx-post="{{ root_path }}/admin/tool-apis/{{ row.id }}/sync"
+              hx-target="#tool-apis-content"
+              hx-swap="innerHTML"
+              hx-confirm="确认同步「{{ row.display_name }}」？同名工具将被覆盖。"
+              class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-3"
+            >同步</button>
+            <button
+              type="button"
+              hx-get="{{ root_path }}/admin/tool-apis/partial?form={{ row.id }}"
+              hx-target="#tool-apis-content"
+              hx-swap="innerHTML"
+              class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white mr-3"
+            >编辑</button>
+            <button
+              type="button"
+              hx-post="{{ root_path }}/admin/tool-apis/{{ row.id }}/delete"
+              hx-target="#tool-apis-content"
+              hx-swap="innerHTML"
+              hx-confirm="确认删除已保存的 API「{{ row.display_name }}」？已同步的工具会保留。"
+              class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
+            >删除</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="px-3 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+            还没有保存的 API。点击 <strong>+ 新增 API</strong> 保存一份 tool JSON 定义或拉取地址，之后在这里一键同步，无需重新导入。
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

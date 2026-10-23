@@ -1,7 +1,7 @@
 import { AppState } from "./appState.js";
 import { getCatalogUrl } from "./configExport.js";
 import { toggleViewPublic } from "./filters.js";
-import { initGatewaySelect } from "./gateways.js";
+import { initGatewaySelect, reloadAssociatedItems } from "./gateways.js";
 import { openModal } from "./modals.js";
 import { initPromptSelect } from "./prompts.js";
 import { initResourceSelect } from "./resources.js";
@@ -909,6 +909,12 @@ export const editServer = async function (serverId) {
     ensureEditStoreListeners();
 
     openModal("server-edit-modal");
+    // The selector lists were loaded once at page load (hx-trigger="load"), so
+    // tools created since then (e.g. via MCP API sync) would be missing. Reload
+    // the lists now; checked state is restored by the afterSwap listener below.
+    if (typeof reloadAssociatedItems === "function") {
+      reloadAssociatedItems();
+    }
     applyVisibilityRestrictions(["edit-server-visibility"]); // Disable public radio if restricted, preserve checked state
     // Initialize the select handlers for gateways, resources and prompts in the edit modal
     // so that gateway changes will trigger filtering of associated items while editing.
@@ -1239,6 +1245,19 @@ export function ensureEditStoreListeners() {
           } else {
             sel.delete(value);
           }
+        }
+      });
+      // Fresh selector content arrives via HTMX swaps (edit-open reload and
+      // infinite-scroll pages) with every checkbox unchecked; without this,
+      // initToolSelect's update() would sync that empty DOM state into the
+      // selection store and silently drop the server's associations.
+      container.addEventListener("htmx:afterSwap", function () {
+        const server =
+          window.Admin && window.Admin.currentEditingServer
+            ? window.Admin.currentEditingServer
+            : null;
+        if (server) {
+          setEditServerAssociations(server);
         }
       });
     }
