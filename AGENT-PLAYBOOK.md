@@ -12,6 +12,10 @@
   - 3 个自定义 alembic 迁移（tool_api_sources 表，链路见 §3）
   - 部署文件：`docker-compose.aliyun.yml`、`k8s/mcp-hub.yaml`、`.env.aliyun.local`（gitignored）
 - 版本镜像 tag 规则：`v1.1.0-<上游合并后的 head 短 sha>`（前缀对齐上游最新 release，2026-10-21 起为 v1.1.0，此前 2026-09-28 起为 v1.0.11；上游发新 release tag 时同步换前缀，别用自造编号。fetch 输出里出现 `[new tag] vX.Y.Z` 就是换前缀的信号）
+- ⚠️ **2026-10-22 上游强制重写了 main 历史**（内容等价、SHA 全变，共同祖先退回 2025-05-08，原因未知疑似清理）。旧 fork main 与新历史分叉 3400/3300，
+  GitHub Sync fork 失效、普通 merge 也不可用。当日重建：以新上游 head 为基、`git checkout main -- .` 把 fork 定制按**最终状态**搬过去（1 个提交）+ cherry-pick 当日新提交 #7300。
+  **不要用逐提交 rebase**——合并期冲突解决会丢（主题定制从 tailwind.config.js 迁到 tailwind.src.css 的那次解决就丢过）。
+  旧历史备份在本地分支 `main-pre-rewrite`（旧上游链 + 70 个自有提交），仅供参考不推送。此后同步恢复正常 merge 语义。
 
 ## 1. 远程仓库与网络
 
