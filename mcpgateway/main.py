@@ -60,7 +60,7 @@ from jinja2 import Environment, FileSystemLoader
 from jsonpath_ng.ext import parse
 from jsonpath_ng.jsonpath import JSONPath
 import orjson
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -112,7 +112,7 @@ from mcpgateway.middleware.header_size_middleware import HeaderSizeMiddleware
 from mcpgateway.middleware.http_auth_middleware import HttpAuthMiddleware, run_pre_request_hooks
 from mcpgateway.middleware.protocol_version import MCPProtocolVersionMiddleware
 from mcpgateway.middleware.rate_limit_middleware import RateLimitMiddleware
-from mcpgateway.middleware.rbac import _ACCESS_DENIED_MSG, get_current_user_with_permissions, PermissionChecker, require_permission
+from mcpgateway.middleware.rbac import _ACCESS_DENIED_MSG, check_permission_inline, get_current_user_with_permissions, PermissionChecker, require_permission
 from mcpgateway.middleware.request_logging_middleware import RequestLoggingMiddleware
 from mcpgateway.middleware.security_headers import SecurityHeadersMiddleware
 from mcpgateway.middleware.token_scoping import ResourceOwnershipResult, token_scoping_middleware
@@ -972,6 +972,69 @@ def _serialize_legacy_tool_payloads(tools: List[Any]) -> List[Dict[str, Any]]:
             payload = {}
         payloads.append(payload)
     return payloads
+
+
+_PUBLIC_ONLY_CREATE_DENIED = "Public-only tokens cannot create team or private resources. Use visibility='public' or obtain a team-scoped token."
+_CREATE_TEAM_DENIED = "Access issue: This API token does not have the required permissions for this team."
+
+
+class _CreateScopeDenied(Exception):
+    """Raised when a create request asks for a team or visibility outside the caller's scope."""
+
+
+async def _resolve_create_scope(
+    request: Request,
+    user: dict,
+    db: Session,
+    permission: str,
+    payload: BaseModel,
+    team_id: Optional[str],
+    visibility: Optional[str],
+) -> tuple[Optional[str], str]:
+    """Resolve the effective team and visibility for a create request.
+
+    The team and visibility may arrive at the top level of the body or nested in
+    the payload. Every candidate is checked against the authenticated token scope
+    and RBAC before the service layer persists it.
+
+    Args:
+        request: Incoming request carrying the token scope on ``request.state``.
+        user: Authenticated user context.
+        db: Active database session.
+        permission: Create permission checked for the final team (e.g. ``servers.create``).
+        payload: Create schema that may carry nested ``team_id`` and ``visibility``.
+        team_id: Top-level team ID from the request body.
+        visibility: Top-level visibility from the request body.
+
+    Returns:
+        tuple[Optional[str], str]: Effective team ID and visibility.
+
+    Raises:
+        _CreateScopeDenied: If the requested scope is outside the caller's token scope or permissions.
+    """
+    token_team_id = getattr(request.state, "team_id", None)
+    token_teams = getattr(request.state, "token_teams", None)
+
+    nested_team = getattr(payload, "team_id", None)
+    if team_id and nested_team and team_id != nested_team:
+        raise _CreateScopeDenied(_CREATE_TEAM_DENIED)
+    team_id = team_id or nested_team
+    visibility = visibility or getattr(payload, "visibility", None) or "public"
+
+    if token_teams is not None and len(token_teams) == 0:
+        if visibility in ("team", "private"):
+            raise _CreateScopeDenied(_PUBLIC_ONLY_CREATE_DENIED)
+        return None, visibility
+
+    team_id = team_id or token_team_id
+    if team_id and token_team_id and team_id != token_team_id:
+        raise _CreateScopeDenied(_CREATE_TEAM_DENIED)
+    # Membership rule: a global role grants the permission for any team, so the token scope must also contain the team.
+    if team_id and token_teams is not None and team_id not in token_teams:
+        raise _CreateScopeDenied(_CREATE_TEAM_DENIED)
+    if team_id and not await check_permission_inline(user, permission, team_id=team_id, db=db, request=request):
+        raise _CreateScopeDenied(f"Missing {permission} in the requested team.")
+    return team_id, visibility
 
 
 def _enforce_scoped_resource_access(request: Request, db: Session, user, resource_path: str) -> None:
@@ -4248,29 +4311,10 @@ async def create_server(
         # Get user email and handle team assignment
         user_email = get_user_email(user)
 
-        token_team_id = getattr(request.state, "team_id", None)
-        token_teams = getattr(request.state, "token_teams", None)
-
-        # SECURITY: Public-only tokens (teams == []) cannot create team/private resources
-        is_public_only_token = token_teams is not None and len(token_teams) == 0
-        if is_public_only_token and visibility in ("team", "private"):
-            return ORJSONResponse(
-                content={"message": "Public-only tokens cannot create team or private resources. Use visibility='public' or obtain a team-scoped token."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Check for team ID mismatch (only for non-public-only tokens)
-        if not is_public_only_token and team_id is not None and token_team_id is not None and team_id != token_team_id:
-            return ORJSONResponse(
-                content={"message": "Access issue: This API token does not have the required permissions for this team."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Determine final team ID (public-only tokens get no team)
-        if is_public_only_token:
-            team_id = None
-        else:
-            team_id = team_id or token_team_id
+        try:
+            team_id, visibility = await _resolve_create_scope(request, user, db, "servers.create", server, team_id, visibility)
+        except _CreateScopeDenied as exc:
+            return ORJSONResponse(content={"message": str(exc)}, status_code=status.HTTP_403_FORBIDDEN)
 
         logger.debug(f"User {SecurityValidator.sanitize_log_message(user_email)} is creating a new server for team {team_id}")
         result = await server_service.register_server(
@@ -5798,29 +5842,10 @@ async def create_tool(
         # Get user email and handle team assignment
         user_email = get_user_email(user)
 
-        token_team_id = getattr(request.state, "team_id", None)
-        token_teams = getattr(request.state, "token_teams", None)
-
-        # SECURITY: Public-only tokens (teams == []) cannot create team/private resources
-        is_public_only_token = token_teams is not None and len(token_teams) == 0
-        if is_public_only_token and tool.visibility in ("team", "private"):
-            return ORJSONResponse(
-                content={"message": "Public-only tokens cannot create team or private resources. Use visibility='public' or obtain a team-scoped token."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Check for team ID mismatch (only for non-public-only tokens)
-        if not is_public_only_token and team_id is not None and token_team_id is not None and team_id != token_team_id:
-            return ORJSONResponse(
-                content={"message": "Access issue: This API token does not have the required permissions for this team."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Determine final team ID (public-only tokens get no team)
-        if is_public_only_token:
-            team_id = None
-        else:
-            team_id = team_id or token_team_id
+        try:
+            team_id, visibility = await _resolve_create_scope(request, user, db, "tools.create", tool, team_id, None)
+        except _CreateScopeDenied as exc:
+            return ORJSONResponse(content={"message": str(exc)}, status_code=status.HTTP_403_FORBIDDEN)
 
         logger.debug(f"User {SecurityValidator.sanitize_log_message(user_email)} is creating a new tool for team {team_id}")
         result = await tool_service.register_tool(
@@ -5834,7 +5859,7 @@ async def create_tool(
             federation_source=metadata["federation_source"],
             team_id=team_id,
             owner_email=user_email,
-            visibility=tool.visibility,
+            visibility=visibility,
         )
         db.commit()
         db.close()
@@ -5869,7 +5894,7 @@ async def preview_tool(
     db: Session = Depends(get_db),
     user=Depends(get_current_user_with_permissions),
 ) -> ToolPreviewResponse:
-    """Validate and resolve a tool invocation without executing it (#5629).
+    """Validate and resolve a tool invocation without executing it.
 
     Dry-run counterpart to live tool invocation: no REST/MCP/A2A/gRPC call is made, and no
     TOOL_POST_INVOKE hook runs. Shares tool resolution/RBAC with the live invocation path
@@ -5879,7 +5904,7 @@ async def preview_tool(
     Args:
         name: Name of the tool to preview.
         request: FastAPI request object, used to resolve the caller's visibility scope.
-        body: Candidate arguments to validate against the tool's input schema.
+        body: Candidate arguments and optional server_id for scoped resolution.
         db: Database session.
         user: Authenticated user with permissions.
 
@@ -5888,8 +5913,9 @@ async def preview_tool(
             plugin pre-hooks that actually ran, and non-fatal warnings).
 
     Raises:
-        HTTPException: 404 if the feature is disabled, or if the tool is not found or not
-            accessible to the caller (same visibility rules as live invocation). 400 if
+        HTTPException: 404 if the feature is disabled, or if the tool/server is not found or not
+            accessible to the caller (same visibility rules as live invocation). 403 if the
+            server_id is provided but the token is not authorized for that server. 400 if
             resolution fails for a reason short of not-found -- an ambiguous tool name or a
             deprecated tool (same as live invocation's own ``ToolInvocationError`` handling).
     """
@@ -5898,6 +5924,30 @@ async def preview_tool(
 
     body = body or ToolPreviewRequest()
     auth_user_email, auth_token_teams = get_scoped_resource_access_context(request, user)
+
+    server_id = body.server_id
+    if server_id:
+        cached = getattr(request.state, "_jwt_verified_payload", None)
+        payload = cached[1] if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[1], dict) else None
+        if cached is not None and payload is None:
+            raise HTTPException(status_code=403, detail="Unable to read verified token scopes")
+        # Legacy and session tokens may omit scopes; malformed scopes must not grant access.
+        token_scopes = payload.get("scopes", {}) if payload is not None else {}
+        if not isinstance(token_scopes, dict):
+            raise HTTPException(status_code=403, detail="Unable to read verified token scopes")
+        if not validate_server_access(token_scopes, server_id):
+            raise HTTPException(status_code=403, detail=f"Token not authorized for server: {server_id}")
+
+        try:
+            await server_service.ensure_server_access(
+                db=db,
+                server_id=server_id,
+                user_email=auth_user_email,
+                token_teams=auth_token_teams,
+            )
+        except ServerNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
     try:
         return await tool_service.preview_tool_invocation(
             db,
@@ -5905,6 +5955,7 @@ async def preview_tool(
             arguments=body.arguments,
             user_email=auth_user_email,
             token_teams=auth_token_teams,
+            server_id=server_id,
             # SECURITY: strip Authorization/Cookie/etc. before these reach a preview_safe
             # plugin's TOOL_PRE_INVOKE hook -- live invocation never hands a hook the
             # caller's raw inbound headers either, only resolved runtime headers.
@@ -6371,7 +6422,7 @@ async def create_resource(
     resource: ResourceCreate,
     request: Request,
     team_id: Optional[str] = Body(None, description="Team ID to assign resource to"),
-    visibility: Optional[str] = Body("public", description="Resource visibility: private, team, public"),
+    visibility: Optional[str] = Body(None, description="Resource visibility: private, team, public"),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_with_permissions),
 ) -> ResourceRead:
@@ -6399,29 +6450,10 @@ async def create_resource(
         # Get user email and handle team assignment
         user_email = get_user_email(user)
 
-        token_team_id = getattr(request.state, "team_id", None)
-        token_teams = getattr(request.state, "token_teams", None)
-
-        # SECURITY: Public-only tokens (teams == []) cannot create team/private resources
-        is_public_only_token = token_teams is not None and len(token_teams) == 0
-        if is_public_only_token and visibility in ("team", "private"):
-            return ORJSONResponse(
-                content={"message": "Public-only tokens cannot create team or private resources. Use visibility='public' or obtain a team-scoped token."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Check for team ID mismatch (only for non-public-only tokens)
-        if not is_public_only_token and team_id is not None and token_team_id is not None and team_id != token_team_id:
-            return ORJSONResponse(
-                content={"message": "Access issue: This API token does not have the required permissions for this team."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Determine final team ID (public-only tokens get no team)
-        if is_public_only_token:
-            team_id = None
-        else:
-            team_id = team_id or token_team_id
+        try:
+            team_id, visibility = await _resolve_create_scope(request, user, db, "resources.create", resource, team_id, visibility)
+        except _CreateScopeDenied as exc:
+            return ORJSONResponse(content={"message": str(exc)}, status_code=status.HTTP_403_FORBIDDEN)
 
         logger.debug(f"User {SecurityValidator.sanitize_log_message(user_email)} is creating a new resource for team {team_id}")
         result = await resource_service.register_resource(
@@ -6939,7 +6971,7 @@ async def create_prompt(
     prompt: PromptCreate,
     request: Request,
     team_id: Optional[str] = Body(None, description="Team ID to assign prompt to"),
-    visibility: Optional[str] = Body("public", description="Prompt visibility: private, team, public"),
+    visibility: Optional[str] = Body(None, description="Prompt visibility: private, team, public"),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_with_permissions),
 ) -> PromptRead:
@@ -6969,29 +7001,10 @@ async def create_prompt(
         # Get user email and handle team assignment
         user_email = get_user_email(user)
 
-        token_team_id = getattr(request.state, "team_id", None)
-        token_teams = getattr(request.state, "token_teams", None)
-
-        # SECURITY: Public-only tokens (teams == []) cannot create team/private resources
-        is_public_only_token = token_teams is not None and len(token_teams) == 0
-        if is_public_only_token and visibility in ("team", "private"):
-            return ORJSONResponse(
-                content={"message": "Public-only tokens cannot create team or private resources. Use visibility='public' or obtain a team-scoped token."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Check for team ID mismatch (only for non-public-only tokens)
-        if not is_public_only_token and team_id is not None and token_team_id is not None and team_id != token_team_id:
-            return ORJSONResponse(
-                content={"message": "Access issue: This API token does not have the required permissions for this team."},
-                status_code=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Determine final team ID (public-only tokens get no team)
-        if is_public_only_token:
-            team_id = None
-        else:
-            team_id = team_id or token_team_id
+        try:
+            team_id, visibility = await _resolve_create_scope(request, user, db, "prompts.create", prompt, team_id, visibility)
+        except _CreateScopeDenied as exc:
+            return ORJSONResponse(content={"message": str(exc)}, status_code=status.HTTP_403_FORBIDDEN)
 
         logger.debug(f"User {SecurityValidator.sanitize_log_message(user_email)} is creating a new prompt for team {team_id}")
         result = await prompt_service.register_prompt(
