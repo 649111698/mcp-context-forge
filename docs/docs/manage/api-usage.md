@@ -27,6 +27,23 @@ The gateway forwards the reference, argument, context, and request `_meta` to th
 owning upstream. Local schema completion remains available for local references.
 An upstream without `completions` returns JSON-RPC `-32601` on MCP routes.
 
+## Terminology aliases
+
+The product calls a registered upstream an "MCP server" and a virtual server a "virtual server". The API keeps the original names and also accepts the product names in requests.
+
+| Original | Alias | Where |
+|----------|-------|-------|
+| `gateway_id` | `mcp_server_id` | Tool, resource, and prompt create and update bodies; the MCP-server handshake test body |
+| `gateway_id` | `mcp_server_id` | Query filter on `GET /tools`, `GET /resources`, `GET /prompts`, and `GET /v1/search` |
+| `server` | `virtual_server` | Top-level key of the `POST /servers` and `POST /v1/virtual-servers` body |
+
+Rules:
+
+- Both spellings work. Responses keep the original key names.
+- Camel-case bodies accept `mcpServerId` where they accept `gatewayId`.
+- A request that sends both spellings with different values returns `422`.
+- A request that sends both spellings with the same value is accepted.
+
 ## Prerequisites
 
 Before using the API, you need to:
@@ -912,6 +929,55 @@ curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
   }' \
   $BASE_URL/servers/$SERVER_ID | jq '.'
 ```
+
+### Server Instructions
+
+A virtual server tells each MCP client how to use it. The text is the `instructions` field of the handshake result:
+
+- Legacy era (`2025-11-25` and earlier): the `initialize` result.
+- Modern era (`2026-07-28`): the `server/discover` result.
+
+The gateway chooses the text in this order:
+
+1. **Operator override.** The `instructions` field of the virtual server, when it is not `null`.
+   An empty string (`""`) is an override that sends no `instructions` field.
+2. **Upstream text.** The text of the upstream server, when the virtual server is single-upstream.
+   A virtual server is single-upstream when every tool, resource, and prompt comes from the same registered gateway
+   and the virtual server has no A2A agent. A virtual server that uses only some tools of one gateway is single-upstream.
+   When that upstream server sends no text, the virtual server sends the default text.
+   A caller that cannot see the upstream gateway also receives the default text.
+3. **Default text.** Every other virtual server, and the global `/mcp` endpoint, send the default text.
+
+```bash
+# Set an override
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"instructions": "Call get_system_time before any other tool."}' \
+  $BASE_URL/servers/$SERVER_ID | jq '.instructions'
+
+# Send no instructions field
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"instructions": ""}' \
+  $BASE_URL/servers/$SERVER_ID | jq '.instructions'
+
+# Remove the override and use the upstream or default text again
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"instructions": null}' \
+  $BASE_URL/servers/$SERVER_ID | jq '.instructions'
+```
+
+A request that omits `instructions` leaves the override unchanged. The maximum length is 8192 characters.
+The Admin UI shows the same field as **Instructions** on the create and edit forms. A blank field means `null`.
+
+!!! note "When upstream text changes"
+    The gateway stores the upstream text when it connects to the upstream server and when it refreshes the gateway.
+    A change on the upstream server reaches clients after the next refresh, not on the next request.
+
+!!! warning "Upstream text is untrusted"
+    A client can place `instructions` in the prompt of a model. A malicious or faulty upstream server can use this
+    to steer the model. If you do not trust an upstream server, set an override on each virtual server that uses it.
 
 ### Enable/Disable Server
 
