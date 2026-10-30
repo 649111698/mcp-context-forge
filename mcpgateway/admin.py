@@ -111,6 +111,7 @@ from mcpgateway.db import Prompt as DbPrompt
 from mcpgateway.db import Resource as DbResource
 from mcpgateway.db import Server as DbServer
 from mcpgateway.db import SessionLocal
+from mcpgateway.db import ToolApiSource
 from mcpgateway.db import Tool as DbTool
 from mcpgateway.db import utc_now
 from mcpgateway.middleware.rbac import _ACCESS_DENIED_MSG, get_current_user_with_permissions, require_admin_permission, require_any_permission, require_permission
@@ -155,6 +156,7 @@ from mcpgateway.schemas import (
     ServerMetrics,
     ServerRead,
     ServerUpdate,
+    ToolApiSourceSaveRequest,
     ToolCreate,
     ToolMetrics,
     ToolRead,
@@ -15639,13 +15641,13 @@ async def admin_tool_apis_save(
         return await error_page(str(ex))
 
 
-@admin_router.post("/tool-apis/sync-all")
+@admin_router.post("/tool-apis/sync-all", response_model=None)
 @require_permission("tools.create", allow_admin_bypass=False)
 async def admin_tool_apis_sync_all(
     request: Request,
     db: Session = Depends(get_db),
     user=Depends(get_current_user_with_permissions),
-) -> HTMLResponse:
+) -> Union[HTMLResponse, Dict[str, Any]]:
     """Sync every enabled tool API source into the tool catalog.
 
     Args:
@@ -15654,9 +15656,16 @@ async def admin_tool_apis_sync_all(
         user: Authenticated user.
 
     Returns:
-        HTMLResponse re-rendering the partial with the sync summary.
+        HTMLResponse re-rendering the partial with the sync summary, or the
+        aggregated sync result dict for JSON API callers.
     """
     user_email = get_user_email(user)
+    if _is_json_api_request(request):
+        try:
+            return await tool_api_source_service.sync_all(db, user_email=user_email)
+        except Exception:  # pylint: disable=broad-exception-caught
+            LOGGER.exception("Tool API sync-all failed")
+            raise HTTPException(status_code=500, detail="Tool API sync-all failed") from None
     try:
         result = await tool_api_source_service.sync_all(db, user_email=user_email)
         return await _render_tool_apis_partial(request, db, message=result["summary"], message_is_error=result["failed"] > 0, refresh_tools_table=True)
@@ -15665,14 +15674,14 @@ async def admin_tool_apis_sync_all(
         return await _render_tool_apis_partial(request, db, message=f"同步失败：{ex}", message_is_error=True)
 
 
-@admin_router.post("/tool-apis/{source_id}/sync")
+@admin_router.post("/tool-apis/{source_id}/sync", response_model=None)
 @require_permission("tools.create", allow_admin_bypass=False)
 async def admin_tool_apis_sync(
     source_id: str,
     request: Request,
     db: Session = Depends(get_db),
     user=Depends(get_current_user_with_permissions),
-) -> HTMLResponse:
+) -> Union[HTMLResponse, Dict[str, Any]]:
     """Sync one saved tool API source into the tool catalog.
 
     Existing tools with the same name are overwritten; unknown names are
@@ -15685,9 +15694,20 @@ async def admin_tool_apis_sync(
         user: Authenticated user.
 
     Returns:
-        HTMLResponse re-rendering the partial with the sync summary.
+        HTMLResponse re-rendering the partial, or the sync result dict for
+        JSON API callers.
     """
     user_email = get_user_email(user)
+    if _is_json_api_request(request):
+        try:
+            return await tool_api_source_service.sync_source(db, source_id, user_email=user_email)
+        except ToolApiSourceNotFoundError:
+            raise HTTPException(status_code=404, detail="Tool API source not found") from None
+        except ToolApiSourceValidationError as ex:
+            raise HTTPException(status_code=422, detail=str(ex)) from ex
+        except Exception:  # pylint: disable=broad-exception-caught
+            LOGGER.exception("Tool API sync failed for source %s", source_id)
+            raise HTTPException(status_code=500, detail="Tool API sync failed") from None
     try:
         result = await tool_api_source_service.sync_source(db, source_id, user_email=user_email)
         return await _render_tool_apis_partial(request, db, message=result["summary"], message_is_error=result["failed"] > 0, refresh_tools_table=True)
@@ -15724,6 +15744,273 @@ async def admin_tool_apis_delete(
         return await _render_tool_apis_partial(request, db, message=f"已删除 API「{display_name}」（工具保留）")
     except ToolApiSourceNotFoundError:
         return await _render_tool_apis_partial(request, db, message="未找到该 API 源", message_is_error=True)
+
+
+####################
+# Tool API Sources — JSON API (contextforge-web-ui frontend)
+####################
+
+
+def _is_json_api_request(request: Request) -> bool:
+    """Whether the client speaks the JSON API rather than the HTMX partial.
+
+    The web-ui BFF always sends ``Content-Type: application/json``; HTMX form
+    posts are form-urlencoded. Sync endpoints share one path across both
+    surfaces, so the content type is the discriminator.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        True when the response should be JSON.
+    """
+    return "application/json" in (request.headers.get("content-type") or "").lower()
+
+
+def _tool_api_source_to_dict(source: ToolApiSource) -> Dict[str, Any]:
+    """Serialize a tool API source for the JSON API; the credential is never included.
+
+    Args:
+        source: The ToolApiSource row.
+
+    Returns:
+        Dict with display fields, fetch config, tool summary, sync state and
+        the stored tool JSON.
+    """
+    return {
+        "id": source.id,
+        "display_name": source.display_name,
+        "description": source.description,
+        "enabled": source.enabled,
+        "owner_email": source.owner_email,
+        "source_url": source.source_url,
+        "fetch_method": source.fetch_method or "GET",
+        "request_body": source.request_body or "",
+        "auth_type": source.auth_type or "none",
+        "auth_header_key": source.auth_header_key,
+        "has_credential": bool(source.auth_credential),
+        "content": source.content,
+        "summary": tool_api_source_service.summarize_content(source.content),
+        "last_synced_at": source.last_synced_at,
+        "last_sync_result": source.last_sync_result,
+        "created_at": source.created_at,
+        "updated_at": source.updated_at,
+    }
+
+
+async def _fetch_tool_api_content(payload: ToolApiSourceSaveRequest) -> str:
+    """Fetch and validate remote tool JSON for a save payload.
+
+    Args:
+        payload: Save request carrying the URL, method and auth config.
+
+    Returns:
+        The fetched JSON text (stripped).
+
+    Raises:
+        ToolApiSourceValidationError: When the fetch or JSON validation fails.
+    """
+    fetched = (
+        await tool_api_source_service.fetch_url_content(
+            payload.source_url,
+            auth_type=payload.auth_type,
+            auth_credential=payload.auth_credential or None,
+            auth_header_key=payload.auth_header_key or None,
+            fetch_method=payload.fetch_method,
+            request_body=payload.request_body or None,
+        )
+    ).strip()
+    tool_api_source_service.parse_content(fetched)
+    return fetched
+
+
+@admin_router.get("/tool-apis")
+@require_permission("tools.read", allow_admin_bypass=False)
+async def admin_tool_apis_list_json(
+    request: Request,  # pylint: disable=unused-argument
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),  # pylint: disable=unused-argument
+) -> Dict[str, Any]:
+    """List saved tool API sources as JSON.
+
+    Args:
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        Dict with ``items`` — one entry per source. The credential is never
+        included; ``has_credential`` only reports its presence.
+    """
+    db.commit()  # end the read-only transaction before serializing
+    return {"items": [_tool_api_source_to_dict(source) for source in tool_api_source_service.list_sources(db)]}
+
+
+@admin_router.get("/tool-apis/{source_id}")
+@require_permission("tools.read", allow_admin_bypass=False)
+async def admin_tool_apis_get_json(
+    source_id: str,
+    request: Request,  # pylint: disable=unused-argument
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),  # pylint: disable=unused-argument
+) -> Dict[str, Any]:
+    """Fetch one saved tool API source as JSON.
+
+    Args:
+        source_id: Source id.
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        The source with the stored tool JSON for editing.
+
+    Raises:
+        HTTPException: 404 when the source does not exist.
+    """
+    try:
+        source = tool_api_source_service.get_source(db, source_id)
+    except ToolApiSourceNotFoundError:
+        raise HTTPException(status_code=404, detail="Tool API source not found") from None
+    db.commit()  # end the read-only transaction before serializing
+    return _tool_api_source_to_dict(source)
+
+
+@admin_router.post("/tool-apis")
+@require_permission("tools.create", allow_admin_bypass=False)
+async def admin_tool_apis_create_json(
+    payload: ToolApiSourceSaveRequest,
+    request: Request,  # pylint: disable=unused-argument
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),
+) -> Dict[str, Any]:
+    """Create a tool API source from a JSON payload.
+
+    When ``source_url`` is set, the URL is fetched with the given auth before
+    saving; the fetched JSON must validate and becomes the content snapshot.
+    Manual mode requires ``content``.
+
+    Args:
+        payload: Save request fields.
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user (owner of the new source).
+
+    Returns:
+        The created source.
+
+    Raises:
+        HTTPException: 422 on validation errors.
+    """
+    user_email = get_user_email(user)
+    try:
+        content = (payload.content or "").strip()
+        if (payload.source_url or "").strip():
+            content = await _fetch_tool_api_content(payload)
+        elif not content:
+            raise ToolApiSourceValidationError("请提供工具 JSON（content）或源 URL")
+        source = tool_api_source_service.create_source(
+            db,
+            display_name=payload.display_name,
+            description=payload.description,
+            content=content,
+            enabled=payload.enabled,
+            owner_email=user_email,
+            source_url=payload.source_url,
+            auth_type=payload.auth_type,
+            auth_header_key=payload.auth_header_key,
+            auth_credential=payload.auth_credential,
+            fetch_method=payload.fetch_method,
+            request_body=payload.request_body,
+        )
+        return _tool_api_source_to_dict(source)
+    except ToolApiSourceValidationError as ex:
+        raise HTTPException(status_code=422, detail=str(ex)) from ex
+
+
+@admin_router.put("/tool-apis/{source_id}")
+@require_permission("tools.create", allow_admin_bypass=False)
+async def admin_tool_apis_update_json(
+    source_id: str,
+    payload: ToolApiSourceSaveRequest,
+    request: Request,  # pylint: disable=unused-argument
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),  # pylint: disable=unused-argument
+) -> Dict[str, Any]:
+    """Update a tool API source from a JSON payload.
+
+    Remote sources (``source_url`` set) are re-fetched; the fetched JSON must
+    validate and replaces the snapshot. Blank ``auth_credential`` keeps the
+    stored secret.
+
+    Args:
+        source_id: Source id.
+        payload: Save request fields.
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        The updated source.
+
+    Raises:
+        HTTPException: 404 when missing, 422 on validation errors.
+    """
+    try:
+        content = (payload.content or "").strip()
+        if (payload.source_url or "").strip():
+            content = await _fetch_tool_api_content(payload)
+        elif not content:
+            raise ToolApiSourceValidationError("请提供工具 JSON（content）或源 URL")
+        source = tool_api_source_service.update_source(
+            db,
+            source_id,
+            display_name=payload.display_name,
+            description=payload.description,
+            content=content,
+            enabled=payload.enabled,
+            source_url=payload.source_url,
+            auth_type=payload.auth_type,
+            auth_header_key=payload.auth_header_key,
+            auth_credential=payload.auth_credential,
+            credential_provided=bool(payload.auth_credential),
+            fetch_method=payload.fetch_method,
+            request_body=payload.request_body,
+        )
+        return _tool_api_source_to_dict(source)
+    except ToolApiSourceNotFoundError:
+        raise HTTPException(status_code=404, detail="Tool API source not found") from None
+    except ToolApiSourceValidationError as ex:
+        raise HTTPException(status_code=422, detail=str(ex)) from ex
+
+
+@admin_router.delete("/tool-apis/{source_id}")
+@require_permission("tools.delete", allow_admin_bypass=False)
+async def admin_tool_apis_delete_json(
+    source_id: str,
+    request: Request,  # pylint: disable=unused-argument
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),  # pylint: disable=unused-argument
+) -> Dict[str, Any]:
+    """Delete a saved tool API source; already-synced tools are kept.
+
+    Args:
+        source_id: Source id.
+        request: FastAPI request.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        Dict confirming the deletion with the former display name.
+
+    Raises:
+        HTTPException: 404 when the source does not exist.
+    """
+    try:
+        display_name = tool_api_source_service.delete_source(db, source_id)
+    except ToolApiSourceNotFoundError:
+        raise HTTPException(status_code=404, detail="Tool API source not found") from None
+    return {"deleted": True, "display_name": display_name}
 
 
 ####################

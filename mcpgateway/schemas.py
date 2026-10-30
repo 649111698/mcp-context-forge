@@ -2321,6 +2321,46 @@ class ToolPreviewResponse(BaseModelWithConfigDict):
     warnings: List[ToolPreviewWarning] = Field(default_factory=list, description="Non-fatal caveats about this preview")
 
 
+class ToolApiSourceSaveRequest(BaseModelWithConfigDict):
+    """Fork (pexetech): create/update payload for the tool API sources JSON API.
+
+    Consumed by ``POST /admin/tool-apis`` and ``PUT /admin/tool-apis/{id}``
+    (the contextforge-web-ui frontend). Mirrors the HTMX form fields of
+    ``POST /admin/tool-apis/save`` so both surfaces share semantics.
+
+    Attributes:
+        display_name (Optional[str]): Label; derived from the tool JSON when blank.
+        description (Optional[str]): Free-text note.
+        content (Optional[str]): Raw tool JSON text. Required for manual-mode
+            creates; for remote sources (``source_url`` set) the fetched
+            snapshot overrides it.
+        enabled (bool): Whether ``sync-all`` includes this source.
+        source_url (Optional[str]): Remote URL to fetch tool JSON from (manual mode when blank).
+        fetch_method (str): HTTP method for the remote fetch (GET/POST).
+        request_body (Optional[str]): JSON object body for POST fetches.
+        auth_type (str): Fetch auth: none/bearer/basic/header.
+        auth_header_key (Optional[str]): Custom header name for header auth.
+        auth_credential (Optional[str]): Secret for the fetch auth. Stored
+            encrypted; never rendered back. Blank/None on update keeps the
+            stored secret.
+
+    Examples:
+        >>> ToolApiSourceSaveRequest(content='{"name":"t","url":"http://x"}').enabled
+        True
+    """
+
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    enabled: bool = True
+    source_url: Optional[str] = None
+    fetch_method: str = "GET"
+    request_body: Optional[str] = None
+    auth_type: str = "none"
+    auth_header_key: Optional[str] = None
+    auth_credential: Optional[str] = None
+
+
 class ResourceCreate(BaseModel):
     """
     Schema for creating a new resource.
