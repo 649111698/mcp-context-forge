@@ -13,6 +13,8 @@ services:
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-4444}:4444"
+      # fork: 新前端（镜像内置 web-ui BFF）入口；WEBUI_REDIS_URL 为空则 BFF 不启动、此映射无服务
+      - "${WEBUI_PORT:-4448}:3000"
     environment:
       # ═══════════ 必填：部署时配置 ═══════════
       # PostgreSQL 连接串，例如：postgresql+psycopg://user:pass@rm-xxx.pg.rds.aliyuncs.com:5432/mcp
@@ -63,6 +65,12 @@ services:
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
       # 实体名称允许中文字符（默认模式仅 ASCII，中文名保存会报 422）
       - VALIDATION_NAME_PATTERN=${VALIDATION_NAME_PATTERN:-^[\w.\- ]+$}
+      # ═══════════ fork：镜像内置新前端（web-ui BFF）═══════════
+      # BFF 会话存储；为空 = 不启动前端进程，镜像退化为纯网关（安全默认）
+      # 注意 db 号与网关缓存错开（网关通常用 /0，这里建议 /1）
+      - WEBUI_REDIS_URL=${WEBUI_REDIS_URL:-}
+      # 纯 HTTP 部署保持 false；走 HTTPS 时设 true（并建议同时设 WEBUI_PUBLIC_ORIGIN）
+      - WEBUI_COOKIE_SECURE=${WEBUI_COOKIE_SECURE:-false}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request, json; d = json.loads(urllib.request.urlopen('http://localhost:4444/health', timeout=5).read()); exit(0 if d.get('status') == 'healthy' else 1)"]
       interval: 30s

@@ -79,6 +79,11 @@ spec:
             - name: http
               containerPort: 4444
               protocol: TCP
+            # fork: web-ui BFF（新前端）端口；WEBUI_REDIS_URL 等变量经 mcp-hub-secrets 注入
+            # （kubectl patch secret mcp-hub-secrets 即可，不要整体 apply 本清单）
+            - name: webui
+              containerPort: 3000
+              protocol: TCP
           envFrom:
             - secretRef:
                 name: mcp-hub-secrets
@@ -171,3 +176,7 @@ spec:
     - name: http
       port: 4444
       targetPort: http
+    # fork: 新前端入口（网关镜像内置 BFF，需 WEBUI_REDIS_URL 才会启动）
+    - name: webui
+      port: 3000
+      targetPort: webui

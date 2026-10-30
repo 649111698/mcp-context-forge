@@ -122,6 +122,23 @@
    # ⚠️ 退出码要用 BUILD_EXIT 判断，不要接 | tail（管道会吞掉失败码）
    rm -f Containerfile.mirror
    ```
+   **新前端（web-ui BFF+SPA）打入镜像（2026-10-30 起）**：overlay 生成脚本末尾额外追加 5 行
+   （COPY webui-img/{node,app,start.sh} + ENV PATH + CMD 覆盖为 /opt/start-webui.sh——
+   start.sh 在 `WEBUI_REDIS_URL` 非空时后台起 BFF（:3000，`COOKIE_SECURE/PORT/CONTEXTFORGE_URL`
+   可用 `WEBUI_*` 前缀覆盖），最后 exec 原始 docker-entrypoint.sh；**WEBUI_REDIS_URL 为空 = 纯网关，
+   镜像可安全原地升级**）。`webui-img/` 在宿主机 staging（gitignore 外、永不提交，同 wheelhouse-img/ 模式）：
+   ```bash
+   cd ../contextforge-web-ui
+   npm install --no-audit --no-fund && npm run build          # SPA → server/public（内含 api:generate+typecheck）
+   (cd server && npm run build && npm ci --omit=dev --no-audit --no-fund)   # BFF → server/dist + 生产依赖
+   cd - && rm -rf webui-img && mkdir -p webui-img/app webui-img/node
+   tar -xJf /tmp/node-22.tar.xz -C webui-img/node --strip-components=1      # npmmirror: https://cdn.npmmirror.com/binaries/node/v22.22.1/node-v22.22.1-linux-x64.tar.xz
+   cp -r ../contextforge-web-ui/server/{dist,public,node_modules,package.json} webui-img/app/
+   cp webui-start.sh webui-img/start.sh && chmod +x webui-img/start.sh   # 模板已进 git（仓库根 webui-start.sh）
+   ```
+   **刷新规则**：web-ui 仓 main 有新提交（合并上游或新功能）→ 重新 staging 再构建网关镜像；
+   web-ui 没动 → webui-img/ 原样复用（node/ 208MB 可长期保留）。本地验证入口是 **4448 → 3000（新前端）**，
+   4447 → 4444（网关/旧 Admin UI）不变；`WEBUI_REDIS_URL` 在 .env.aliyun.local（与网关 REDIS_URL 同实例、db 用 /1）。
    **PyPI 直连被限流/断连时的兜底（2026-10-06 实战验证）**：overlay 里在 Step 2 的 RUN 前插
    `COPY wheelhouse-img/ /tmp/wheels/`，并把该分支里 `"psycopg[c]>=3.3.3"` 改成 `"psycopg[binary]>=3.3.3"`
    （psycopg-c 无 wheel 只有 sdist），即触发上游既有的 hermetic `--no-index --find-links` 离线安装。
@@ -160,6 +177,8 @@
    #  - GET /static/css/tailwind.min.css → 200 且含 --color-indigo-600:#1677ff（fork 主题色；
    #    2026-10-20 起上游把 CSS 挪进 /static/css/ 子目录，旧路径 /static/tailwind.min.css 已 404）
    #  - DB: SELECT version_num FROM alembic_version → 应为 d3f6a9b1c5e8（2026-10-26 起 instructions 两连迁移；除非本次有新迁移）
+   #  - 新前端入口: curl http://localhost:4448/healthz → 200（镜像内置 BFF；404/超时=WEBUI_REDIS_URL 未生效）
+   #    浏览器开 http://localhost:4448/app/login 能登录（新前端完整链路）
    # 铸 JWT：source .env.aliyun.local 后
    #   uv run --no-project python -m mcpgateway.utils.create_jwt_token \
    #     --username admin@example.com --admin -e 30 --secret "$JWT_SECRET_KEY"
@@ -171,6 +190,27 @@
    git push gitlab main            # 主仓库（只推 main，不带 --tags）
    git -c http.proxy=http://127.0.0.1:7897 push origin main   # 异地备份（可选，失败重试 3-5 次）
    ```
+8. **前端仓同步（2026-10-30 起与网关一起做，用户指令「前端后端都一起合并」）**：
+   本地路径 `../contextforge-web-ui`，remote：`gitlab`（code.moldfun.com/ai/contextforge-web-ui，
+   **唯一推送目标**）、`origin`（GitHub fork，**保持上游纯净镜像，永不推自定义提交**——用户要用它
+   Sync fork 拉上游）、`upstream`（github.com/contextforge-org/contextforge-web-ui，只拉）。
+   ```bash
+   cd ../contextforge-web-ui
+   git -c http.proxy=http://127.0.0.1:7897 fetch upstream   # 失败改 ghfast.top 备选，同 §1
+   git merge upstream/main
+   npm install --no-audit --no-fund                          # lockfile 变了才需要；registry 已配 npmmirror
+   npm run api:generate && npm run typecheck                 # 上游刷了 openapi.json 时重生成类型
+   npx vitest run                                            # 全量（~3800 用例，几分钟）
+   npx eslint src server --no-error-on-unmatched-pattern || npx eslint <改动文件> --fix
+   git push gitlab main                                      # 只推 gitlab！
+   ```
+   fork 定制文件（合并冲突高发区）：`src/App.tsx`（lazyNamed 块 + PRIVATE_ROUTE_DEFS 路由表）、
+   `src/components/layout/Sidebar.tsx`（COMPONENTS_NAV_ITEMS + lucide 图标导入）、
+   `src/i18n/locales/{en-US,es-ES,pt-BR}/navigation.json`（navigation.toolApis 键）、
+   同目录 `index.ts`（toolApis 导入与展开）；`toolApis.json`/`tool-apis/`/`ToolApis.*` 为纯新增文件无冲突。
+   ⚠️ i18n 三 locale 键必须齐平（locales.test.ts 强制），冲突解完三个文件都要看。
+   MCP APIs 功能调用的网关 JSON API（/admin/tool-apis*）在网关仓，后端先同步、前端后验证。
+   web-ui 暂不构建镜像（生产未部署前端；要部署时再补构建推送流程）。
 
 ## 4. 生产环境（K8s）升级 runbook
 
