@@ -20,6 +20,7 @@
     - A space in a path placeholder used to fail URL validation and now goes out as `%20`.
     - A value that already holds `%XX` (for example `42%2F43`) used to pass and now returns an error.
     - A value with a `.` or `..` segment returns an error.
+- **LLM gateway models authorization** ([#7388](https://github.com/IBM/mcp-context-forge/pull/7388)) - `GET /llm/gateway/models` and `GET /v1/llm/gateway/models` now require the `llm.read` RBAC permission. Previously, authentication alone passed this route. It now matches `GET /llmchat/gateway/models` and `GET /v1/models`. All built-in roles hold `llm.read`. Principals without `llm.read` (no roles, custom roles, or a custom `DEFAULT_USER_ROLE`) now receive `403`.
 - **Credential updates require `auth_type`** ([#6704](https://github.com/IBM/mcp-context-forge/issues/6704)) - `PUT /a2a/{agent_id}` and `PUT /gateways/{gateway_id}` return 422 when a request sets `auth_token`, `auth_password`, or `auth_header_value` without `auth_type`. Before, the A2A route returned 200 and ignored the credential, and the gateway route returned 200 and wiped the stored credential. Empty strings count as unset. The Admin UI always sends `auth_type`. Partial-body REST clients must add `auth_type`.
 
 ### Security
@@ -42,6 +43,8 @@
 
 - **Plugin manager rebuilds** ([#6532](https://github.com/IBM/mcp-context-forge/issues/6532)) - Tools of a team without tool-specific plugin bindings share one cached plugin manager, so external plugins such as OPA initialise once per team instead of once per tool. Tools with their own bindings keep their own manager. The new `PLUGIN_MANAGER_CACHE_TTL` setting (default `300` seconds, was a fixed 30 seconds) controls how long a manager is cached; `0` disables expiry. The invalidation listener now rebuilds managers after each Redis resubscribe.
 - **LLM Chat loads MCP tools with the MCP SDK client** ([#7090](https://github.com/IBM/mcp-context-forge/issues/7090), [#7332](https://github.com/IBM/mcp-context-forge/pull/7332)) - `langchain-mcp-adapters` has no release compatible with MCP SDK 2.x and is removed from the `llmchat` extra; LLM Chat lists and calls tools through `mcp.client.Client`.
+
+- **Bearer token precedence over auth cookies** - When a request carries both a Bearer token in the configured auth header (`AUTH_HEADER_NAME`, default `Authorization`) and a `jwt_token` or `access_token` cookie, every auth layer (token scoping, `require_auth`, `require_admin_auth`, `/admin/*`, LLM chat `connect`) now authenticates the Bearer principal, and token scopes apply to that credential. Cookie-only and `Authorization: Basic` requests keep cookie authentication. LLM chat `connect` also accepts the `access_token` cookie.
 
 ### Changed
 
