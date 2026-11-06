@@ -14884,6 +14884,9 @@ async def admin_test_gateway(
     Returns:
         GatewayTestResponse: The response from the gateway, including status code, latency, and body
 
+    Raises:
+        HTTPException: 403 if the team is out of token scope or the caller may not use the stored credential.
+
     Examples:
         >>> callable(admin_test_gateway)
         True
@@ -14897,7 +14900,10 @@ async def admin_test_gateway(
         token_teams = user.get("token_teams") if isinstance(user, dict) else None
         if token_teams is not None and team_id not in token_teams:
             raise HTTPException(status_code=403, detail="Access to requested team is not permitted")
-    return await test_gateway_connectivity(request, team_id, user, db)
+    try:
+        return await test_gateway_connectivity(request, team_id, user, db)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 # Event Streaming via SSE to the Admin UI
