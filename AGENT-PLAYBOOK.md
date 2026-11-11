@@ -123,7 +123,9 @@
    rm -f Containerfile.mirror
    ```
    **新前端（web-ui BFF+SPA）打入镜像（2026-10-30 起）**：overlay 生成脚本末尾额外追加 5 行
-   （COPY webui-img/{node,app,start.sh} + ENV PATH + CMD 覆盖为 /opt/start-webui.sh——
+   （COPY 目标路径固定：`webui-img/node→/opt/node`、**`webui-img/app→/opt/webui`**（⚠️ 2026-11-11 踩过：
+   写成 /opt/webui-app 会让 BFF 启动 `cd: /opt/webui` 失败、4448 healthz=000，需重推同 tag）、
+   `start.sh→/opt/start-webui.sh`，加 `ENV PATH=/opt/node/bin:$PATH` 和 CMD 覆盖——
    start.sh 在 `WEBUI_REDIS_URL` 非空时后台起 BFF（:3000，`COOKIE_SECURE/PORT/CONTEXTFORGE_URL`
    可用 `WEBUI_*` 前缀覆盖），最后 exec 原始 docker-entrypoint.sh；**WEBUI_REDIS_URL 为空 = 纯网关，
    镜像可安全原地升级**）。`webui-img/` 在宿主机 staging（gitignore 外、永不提交，同 wheelhouse-img/ 模式）：
