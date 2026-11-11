@@ -225,6 +225,7 @@ from mcpgateway.services.mcp_catalog_service import list_catalog_page
 from mcpgateway.services.mcp_method_registry import mcp_method_registry
 from mcpgateway.services.metrics import setup_metrics
 from mcpgateway.services.modern_listener_service import get_modern_listener_service, init_modern_listener_service
+from mcpgateway.services.resource_subscription_relay import get_resource_subscription_relay
 from mcpgateway.services.permission_service import PermissionService
 from mcpgateway.services.prompt_service import PromptError, PromptLockConflictError, PromptNameConflictError, PromptNotFoundError, PromptUpstreamError, PromptValidationError
 from mcpgateway.services.resource_service import ResourceError, ResourceLockConflictError, ResourceNotFoundError, ResourceURIConflictError, ResourceValidationError
@@ -1636,13 +1637,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_upstream_session_registry(message_handler_factory=_notification_handler_factory)
     logger.info("Upstream session registry initialized (notification fanout enabled)")
 
-    # Standing subscriptions/listen streams to modern (2026-07-28) servers
-    if settings.gateway_modern_listeners_enabled:
-        if settings.mcp_client_connect_mode == "legacy":
-            logger.warning("gateway_modern_listeners_enabled=true ignored: MCP_CLIENT_CONNECT_MODE=legacy disables modern protocol paths")
-        else:
-            await init_modern_listener_service(_notification_svc).initialize()
-
     # Initialize LLM chat router Redis client (only if LLM chat is enabled —
     # importing the router pulls in the langchain stack which is several
     # seconds of cold-start cost).
@@ -1678,6 +1672,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
             await start_primary_worker_elector()
             logger.info("Primary-worker elector started (backend=redis)")
+
+        # Standing subscriptions/listen streams to modern (2026-07-28) servers
+        if settings.gateway_modern_listeners_enabled:
+            if settings.mcp_client_connect_mode == "legacy":
+                logger.warning("gateway_modern_listeners_enabled=true ignored: MCP_CLIENT_CONNECT_MODE=legacy disables modern protocol paths")
+            else:
+                if settings.cache_type == "redis" and settings.primary_worker_election_backend == "filelock":
+                    logger.warning("Modern listeners run on the primary worker: one listener per host; set PRIMARY_WORKER_ELECTION_BACKEND=redis for one per cluster")
+                await init_modern_listener_service(_notification_svc).initialize()
 
         try:
             init_plugin_manager_factory(
@@ -2059,6 +2062,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             modern_listener_service = get_modern_listener_service()
             if modern_listener_service is not None:
                 services_to_shutdown.insert(0, modern_listener_service)
+
+        services_to_shutdown.insert(0, get_resource_subscription_relay())
 
         await shutdown_services(services_to_shutdown)
 
@@ -12164,6 +12169,9 @@ async def _handle_rpc_authenticated(request: Request, db: Session, user):
         elif method.startswith("logging/"):
             # Catch-all for other logging/* methods (currently unsupported)
             result = {}
+        elif method == "subscriptions/listen":
+            # Streaming method: only the /mcp transport can serve it.
+            raise JSONRPCError(-32601, f"Method not found: {method}", {})
         elif method.startswith("extensions/") or method.startswith("io.modelcontextprotocol/"):
             # Check if this is a known MCP Apps method.
             if not mcp_method_registry.is_known_method(method):
