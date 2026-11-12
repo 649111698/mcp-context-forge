@@ -198,6 +198,7 @@ _PERMISSION_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
     ("POST", re.compile(r"^/a2a/invoke/?$"), Permissions.A2A_INVOKE),
     ("POST", re.compile(r"^/a2a/[^/]+/invoke(?:$|/)"), Permissions.A2A_INVOKE),
     ("POST", re.compile(r"^/a2a/[^/]+/jsonrpc(?:$|/)"), Permissions.A2A_INVOKE),
+    ("POST", re.compile(r"^/a2a/[^/]+/test(?:$|/)"), Permissions.A2A_INVOKE),
     ("POST", re.compile(r"^/a2a/[^/]+/(?:state|toggle)(?:$|/)"), Permissions.A2A_UPDATE),
     ("PUT", re.compile(r"^/a2a/[^/]+(?:$|/)"), Permissions.A2A_UPDATE),
     ("DELETE", re.compile(r"^/a2a/[^/]+(?:$|/)"), Permissions.A2A_DELETE),
@@ -807,6 +808,11 @@ class TokenScopingMiddleware:
         # a validly-scoped token (e.g. tools.read-only), so let it through and rely
         # on the handler's per-entity RBAC + token/team scoping to filter results.
         if request_path == "/search" or request_path.startswith("/search/"):
+            return True
+
+        # The caller's own profile and deployment feature flags need no scoped permission;
+        # any authenticated token may read them.
+        if request_method == "GET" and request_path in ("/auth/email/me", "/auth/email/me/"):
             return True
 
         # Handle admin routes with granular route-group mapping.

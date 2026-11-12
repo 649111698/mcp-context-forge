@@ -41,7 +41,7 @@ import re
 import signal
 import sys
 import threading
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple, TypeAlias, Union
+from typing import Any, AsyncIterator, Awaitable, Callable, cast, Dict, List, Optional, Tuple, TypeAlias, Union
 from urllib.parse import urlparse, urlunparse
 import uuid
 import warnings
@@ -132,6 +132,7 @@ from mcpgateway.routers.openapi_schema_router import router as openapi_schema_ro
 from mcpgateway.routers.server_well_known import router as server_well_known_router
 from mcpgateway.routers.well_known import router as well_known_router
 from mcpgateway.schemas import (
+    A2AAgentAggregateMetrics,
     A2AAgentCreate,
     A2AAgentRead,
     A2AAgentUpdate,
@@ -140,6 +141,9 @@ from mcpgateway.schemas import (
     A2APushNotificationConfigCreate,
     A2APushNotificationConfigRequest,
     A2ATaskState,
+    A2ATestErrorResponse,
+    A2ATestRequest,
+    A2ATestResponse,
     AgentCard,
     CursorPaginatedA2AAgentsResponse,
     CursorPaginatedGatewaysResponse,
@@ -181,7 +185,7 @@ from mcpgateway.schemas import (
     ToolUpdate,
 )
 from mcpgateway.services.a2a_server_service import A2AServerService
-from mcpgateway.services.a2a_service import A2AAgentError, A2AAgentNameConflictError, A2AAgentNotFoundError, A2AAgentService
+from mcpgateway.services.a2a_service import A2AAgentError, A2AAgentNameConflictError, A2AAgentNotFoundError, A2AAgentService, raise_if_a2a_disabled
 from mcpgateway.services.audit_trail_service import get_audit_trail_service
 from mcpgateway.services.cancellation_service import cancellation_service
 from mcpgateway.services.completion_service import (
@@ -323,8 +327,8 @@ sampling_handler = SamplingHandler()
 tag_service = TagService()
 export_service = ExportService()
 import_service = ImportService()
-# Initialize A2A service only if A2A features are enabled
-a2a_service = A2AAgentService() if settings.mcpgateway_a2a_enabled else None
+# Created only when A2A is enabled. A2A routes reach handlers only after require_a2a_enabled, so handlers treat it as present.
+a2a_service = cast(A2AAgentService, A2AAgentService() if settings.mcpgateway_a2a_enabled else None)
 
 # Initialize session manager for Streamable HTTP transport
 streamable_http_session = SessionManagerWrapper()
@@ -3666,7 +3670,23 @@ server_router = APIRouter(tags=["Servers"])
 metrics_router = APIRouter(prefix="/metrics", tags=["Metrics"])
 tag_router = APIRouter(prefix="/tags", tags=["Tags"])
 export_import_router = APIRouter(tags=["Export/Import"])
-a2a_router = APIRouter(prefix="/a2a", tags=["A2A Agents"])
+
+
+async def require_a2a_enabled(_user=Depends(get_current_user_with_permissions)) -> None:
+    """Reject A2A requests with a typed 404 when A2A is disabled.
+
+    Authentication runs first, so only authenticated callers learn that A2A is off.
+
+    Args:
+        _user: Authenticated user; resolved to enforce authentication before the flag check.
+
+    Raises:
+        HTTPException: 404 with ``detail.error == "a2a_disabled"`` when A2A is disabled.
+    """
+    raise_if_a2a_disabled()
+
+
+a2a_router = APIRouter(prefix="/a2a", tags=["A2A Agents"], dependencies=[Depends(require_a2a_enabled)])
 
 # Basic Auth setup
 
@@ -4987,9 +5007,6 @@ async def list_a2a_agents(
     if tags:
         tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
-    if a2a_service is None:
-        raise HTTPException(status_code=503, detail="A2A service not available")
-
     # Get filtering context from token (respects token scope)
     user_email, token_teams = get_scoped_resource_access_context(request, user)
 
@@ -5026,6 +5043,41 @@ async def list_a2a_agents(
     return data
 
 
+@a2a_router.get("/metrics", response_model=A2AAgentAggregateMetrics)
+@require_permission("a2a.read")
+async def get_a2a_agent_metrics(
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),
+) -> A2AAgentAggregateMetrics:
+    """
+    Retrieve aggregate metrics for the A2A agents visible to the caller.
+
+    Registered before ``/{agent_id}`` so ``metrics`` is not read as an agent ID.
+
+    Args:
+        request (Request): The FastAPI request object for scope derivation.
+        db (Session): The database session used to interact with the data store.
+        user (str): The authenticated user making the request.
+
+    Returns:
+        A2AAgentAggregateMetrics: Counts, success rate, and response times over visible agents.
+
+    Raises:
+        HTTPException: 503 when A2A is unavailable. 404 when ``MCPGATEWAY_A2A_METRICS_ENABLED`` is false.
+    """
+    if a2a_service is None:
+        raise HTTPException(status_code=503, detail="A2A service not available")
+    if not settings.mcpgateway_a2a_metrics_enabled:
+        logger.debug(f"User {safe_log_user(user)} requested A2A metrics while MCPGATEWAY_A2A_METRICS_ENABLED is false")
+        raise HTTPException(status_code=404, detail="A2A metrics are disabled")
+
+    user_email, token_teams = get_scoped_resource_access_context(request, user)
+    if user_email is None and token_teams is None:
+        token_teams = []  # (None, None) selects the unscoped aggregate; fail closed to public-only.
+    return await a2a_service.aggregate_metrics(db, user_email=user_email, token_teams=token_teams)
+
+
 @a2a_router.get("/{agent_id}", response_model=A2AAgentRead)
 @require_permission("a2a.read")
 async def get_a2a_agent(
@@ -5051,8 +5103,6 @@ async def get_a2a_agent(
     """
     try:
         logger.debug(f"User {safe_log_user(user)} requested A2A agent with ID {agent_id}")
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
 
         # Get filtering context from token (respects token scope)
         user_email, token_teams = get_scoped_resource_access_context(request, user)
@@ -5097,8 +5147,6 @@ async def get_a2a_agent_card(
         HTTPException: If the agent is not found or the caller lacks access.
     """
     logger.debug("User %s requested A2A agent card for ID %s", safe_log_user(user), agent_id)
-    if a2a_service is None:
-        raise HTTPException(status_code=503, detail="A2A service not available")
 
     user_email, token_teams = get_scoped_resource_access_context(request, user)
 
@@ -5175,8 +5223,6 @@ async def create_a2a_agent(
             team_id = team_id or token_team_id
 
         logger.debug(f"User {SecurityValidator.sanitize_log_message(user_email)} is creating a new A2A agent for team {team_id}")
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
         return await a2a_service.register_agent(
             db,
             agent,
@@ -5232,8 +5278,6 @@ async def update_a2a_agent(
         # Extract modification metadata
         mod_metadata = MetadataCapture.extract_modification_metadata(request, user, 0)  # Version will be incremented in service
 
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
         user_email = get_user_email(user)
         return await a2a_service.update_agent(
             db,
@@ -5287,8 +5331,6 @@ async def set_a2a_agent_state(
     try:
         user_email = get_user_email(user)
         logger.debug(f"User {safe_log_user(user)} is toggling A2A agent with ID {agent_id} to {'active' if activate else 'inactive'}")
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
         return await a2a_service.set_agent_state(db, agent_id, activate, user_email=user_email)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
@@ -5349,8 +5391,6 @@ async def delete_a2a_agent(
     """
     try:
         logger.debug(f"User {safe_log_user(user)} is deleting A2A agent with ID {agent_id}")
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
         user_email = get_user_email(user)
         await a2a_service.delete_agent(db, agent_id, user_email=user_email, purge_metrics=purge_metrics)
         return {
@@ -5498,8 +5538,6 @@ def _decode_a2a_page_token(page_token: Optional[str]) -> Optional[Tuple[datetime
 
 def _require_a2a_service() -> A2AAgentService:
     """Return the A2A service or raise 503 when A2A is disabled."""
-    if a2a_service is None:
-        raise HTTPException(status_code=503, detail="A2A service not available")
     return a2a_service
 
 
@@ -5808,8 +5846,6 @@ async def invoke_a2a_agent(
     """
     try:
         logger.debug(f"User {safe_log_user(user)} is invoking A2A agent '{agent_name}' with type '{interaction_type}'")
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
 
         # Extract authentication and request context (shared with /jsonrpc endpoint)
         context = _extract_a2a_request_context(request, user)
@@ -5825,6 +5861,51 @@ async def invoke_a2a_agent(
         raise HTTPException(status_code=404, detail=str(e))
     except A2AAgentError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@a2a_router.post(
+    "/{agent_id}/test",
+    response_model=A2ATestResponse,
+    responses={
+        404: {"model": A2ATestErrorResponse, "description": "Agent not found or not accessible"},
+        422: {"model": A2ATestErrorResponse, "description": "Invalid test parameters. Request body validation failures return the default FastAPI 422 with a list in detail"},
+        500: {"model": A2ATestErrorResponse, "description": "Unexpected error"},
+        502: {"model": A2ATestErrorResponse, "description": "Agent disabled, unreachable or returned an error"},
+    },
+)
+@require_permission("a2a.invoke")
+async def test_a2a_agent(
+    agent_id: str,
+    request: Request,
+    payload: Optional[A2ATestRequest] = Body(default=None),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_with_permissions),
+) -> Dict[str, Any]:
+    """Invoke an A2A agent with a test message.
+
+    Error text is fixed and sanitized. ``result`` relays the upstream agent response unchanged. A test call counts in the agent metrics.
+
+    Args:
+        agent_id: Agent ID.
+        request: The FastAPI request object for scope derivation.
+        payload: Optional body carrying a custom test ``query``.
+        db: Database session.
+        user: Authenticated user.
+
+    Returns:
+        Dict[str, Any]: ``success``, ``result``, ``agent_name`` and ``test_timestamp``.
+
+    Raises:
+        HTTPException: 503 when A2A is unavailable. Otherwise 404, 502, 422 or 500 with a
+            ``detail`` object holding ``success``, ``error``, ``error_type`` and ``agent_id``.
+    """
+    if a2a_service is None:
+        raise HTTPException(status_code=503, detail="A2A service not available")
+
+    outcome = await a2a_service.test_agent(db, agent_id, query=payload.query if payload else None, **_extract_a2a_request_context(request, user))
+    if outcome.status_code != 200:
+        raise HTTPException(status_code=outcome.status_code, detail=outcome.body)
+    return outcome.body
 
 
 @a2a_router.post("/invoke", response_model=A2AInvokeResponse, response_model_exclude_unset=True)
@@ -5860,8 +5941,6 @@ async def invoke_a2a_agent_by_id(
     """
     try:
         logger.debug(f"User {safe_log_user(user)} is invoking A2A agent '{agent_id}' with type '{interaction_type}'")
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
 
         # Extract authentication and request context (shared with /invoke and /jsonrpc endpoints)
         context = _extract_a2a_request_context(request, user)
@@ -6037,9 +6116,6 @@ async def invoke_a2a_agent_jsonrpc(
             return ORJSONResponse(status_code=400, content=error_response)
 
         logger.debug(f"User {safe_log_user(user)} invoking A2A agent '{agent_name}' via JSON-RPC passthrough with method '{method}'")
-
-        if a2a_service is None:
-            raise HTTPException(status_code=503, detail="A2A service not available")
 
         # Extract authentication and request context (shared with /invoke endpoint)
         context = _extract_a2a_request_context(request, user)
@@ -12677,10 +12753,10 @@ async def reset_metrics(entity: Optional[str] = None, entity_id: Optional[int] =
     elif entity.lower() == "prompt":
         await prompt_service.reset_metrics(db)
     elif entity.lower() in ("a2a_agent", "a2a"):
-        if a2a_service and settings.mcpgateway_a2a_metrics_enabled:
-            await a2a_service.reset_metrics(db, str(entity_id) if entity_id is not None else None)
-        else:
-            raise HTTPException(status_code=400, detail="A2A features are disabled")
+        raise_if_a2a_disabled()
+        if not settings.mcpgateway_a2a_metrics_enabled:
+            raise HTTPException(status_code=400, detail="A2A metrics are disabled")
+        await a2a_service.reset_metrics(db, str(entity_id) if entity_id is not None else None)
     else:
         raise HTTPException(status_code=400, detail="Invalid entity type for metrics reset")
     return {"status": "success", "message": f"Metrics reset for {entity if entity else 'all entities'}"}

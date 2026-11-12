@@ -27,6 +27,35 @@ MCPGATEWAY_A2A_ENABLED=true
 MCPGATEWAY_A2A_METRICS_ENABLED=true
 ```
 
+### When A2A Is Disabled
+
+With `MCPGATEWAY_A2A_ENABLED=false`, every A2A route returns 404 with one typed body:
+
+```json
+{"detail": {"error": "a2a_disabled", "message": "A2A is disabled on this gateway"}}
+```
+
+Clients branch on `detail.error`. The check runs after authentication, so unauthenticated callers still receive 401. The OpenAPI schema omits the A2A operations.
+
+Any authenticated user can discover the flag with `GET /auth/email/me`, which returns `features`:
+
+```json
+{"email": "user@example.com", "features": {"a2a": false}}
+```
+
+The admin state, edit, and delete form routes still redirect to the A2A tab, which is hidden when A2A is off.
+
+Status changes from earlier releases:
+
+| Route | Before | After |
+|-------|--------|-------|
+| `/a2a/*`, `/v1/a2a/*` | 404, generic body | 404, typed body |
+| `GET /admin/a2a` | 200, empty page | 404, typed body |
+| `GET /admin/a2a/{agent_id}`, `/admin/a2a/ids`, `/admin/a2a/search`, `/admin/a2a/partial` | 500 or 200 | 404, typed body |
+| `POST /admin/a2a` | 403, `success: false` | 404, typed body |
+| `POST /admin/a2a/{agent_id}/test` | 403, `success: false` | 404, typed body |
+| `POST /metrics/reset`, entity `a2a` | 400, "A2A features are disabled" | 404, typed body |
+
 ### 2. Register an A2A Agent
 
 **Via Admin UI:**
@@ -82,6 +111,29 @@ curl -X POST "http://localhost:4444/a2a/hello_world_agent/invoke" \
     "interaction_type": "test"
   }'
 ```
+
+**Via the test endpoint:**
+
+`POST /v1/a2a/{agent_id}/test` sends a test message and needs no payload. It requires `a2a.invoke`. The optional body field `query` sets the message.
+
+```bash
+curl -X POST "http://localhost:4444/v1/a2a/$AGENT_ID/test" \
+  -H "Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "hello"}'
+```
+
+Success returns 200 with `success`, `result`, `agent_name`, and `test_timestamp`. Failure returns an error status with a `detail` object holding `success`, `error`, `error_type`, and `agent_id`. Request body validation failures (an extra field, a `query` over 4096 characters, a non-JSON body) return the default FastAPI 422, where `detail` is a list of validation errors.
+
+| Status | `error_type` | `error` | Cause |
+|--------|--------------|---------|-------|
+| 404 | `not_found` | `A2A agent not found` | Agent missing or not visible to the caller |
+| 502 | `agent_disabled` | `A2A agent is disabled` | Agent is disabled |
+| 502 | `agent_error` | `A2A agent invocation failed` | Agent unreachable or returned an error |
+| 422 | `validation_error` | Validation message | Invalid test parameters |
+| 500 | `internal_error` | Sanitized message | Unexpected error |
+
+The 404 response is identical for a missing agent and an agent the caller cannot see. The 502 response never carries upstream error text; the gateway logs it. The `result` field relays the agent response unchanged. The gateway forwards the same passthrough headers as a normal invocation, and a test call counts in the agent metrics.
 
 ### 4. Create Virtual Server with A2A Agent
 
@@ -355,6 +407,25 @@ curl -s -H "Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN" \
 - The response carries `Cache-Control: private, no-store` because its content depends on the caller.
 - `supportsAuthenticatedExtendedCard` is `true`, but the gateway does not serve an extended card yet.
 
+## Agent Skills
+
+Set the skills an agent advertises with the top-level `skills` field on `POST /a2a` and `PUT /a2a/{agent_id}`. An update that sends only `skills` leaves `capabilities` unchanged.
+
+```json
+{
+  "skills": [
+    {"id": "summarize", "name": "Summarize", "description": "Summarize text", "tags": ["text"]}
+  ]
+}
+```
+
+- Each skill needs `id`, `name`, `description`, and `tags`. Extra keys such as `examples` pass through to the card.
+- `name`, `description`, and `tags` reject HTML and script patterns.
+- An agent holds at most 100 skills, each skill holds at most 50 tags, and every `id` must be unique in the list.
+- `id`, `name`, and each tag are limited to the name length limit. `description` is limited to the description length limit.
+- Cards read the `skills` field first. An agent without the field publishes `capabilities["skills"]`.
+- An explicit `"skills": []` is authoritative. The agent publishes no skills and the `capabilities["skills"]` fallback does not apply.
+
 ## Agent Types
 
 ### Generic/JSONRPC Agents
@@ -426,6 +497,25 @@ A2A agents provide comprehensive metrics:
 - **Response Times**: Min/max/average response times
 - **Last Interaction**: Timestamp of most recent call
 - **Error Tracking**: Failed call details and error messages
+
+### Aggregate Metrics Endpoint
+
+`GET /v1/a2a/metrics` returns aggregate metrics for the agents the caller can see. The route requires `a2a.read`, not `admin.metrics`.
+
+| Caller | Agents counted |
+|--------|----------------|
+| Token with `teams: []` | Public |
+| Token with `teams: ["t1"]` | Public, team `t1`, own private |
+| Admin token with `teams: null` | Public, all team, own private |
+
+The count includes disabled agents. `activeAgents` counts the enabled ones. An admin never counts the private agents of other users, so the result can be lower than `a2aAgents` on `GET /v1/metrics`, which aggregates every agent.
+
+| Status | Cause |
+|--------|-------|
+| 200 | `A2AAgentAggregateMetrics` body |
+| 401/403 | Missing authentication or missing `a2a.read` |
+| 404 | `MCPGATEWAY_A2A_METRICS_ENABLED` is `false` |
+| 503 | A2A service unavailable |
 
 ## Task and Push Notification Routes
 

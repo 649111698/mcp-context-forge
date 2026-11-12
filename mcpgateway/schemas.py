@@ -34,6 +34,7 @@ from pydantic import (
     AliasChoices,
     AnyHttpUrl,
     BaseModel,
+    computed_field,
     ConfigDict,
     EmailStr,
     Field,
@@ -740,6 +741,43 @@ _DEFAULT_INPUT_SCHEMA: dict = {"type": "object", "properties": {}}
 
 _GATEWAY_ID_ALIAS = AliasChoices("gateway_id", "mcp_server_id")
 _GATEWAY_ID_CAMEL_ALIAS = AliasChoices("gatewayId", "gateway_id", "mcpServerId", "mcp_server_id")
+
+
+class McpServerIdResponseMixin(BaseModelWithConfigDict):
+    """Response mixin that emits ``mcp_server_id`` next to a nullable ``gateway_id``.
+
+    ``mcp_server_id`` is the product-terminology alias of ``gateway_id``. Both keys
+    carry the same value until the legacy name is removed. The subclass declares
+    ``gateway_id``.
+    """
+
+    @computed_field(description="Product-terminology alias of gateway_id")  # type: ignore[prop-decorator]
+    @property
+    def mcp_server_id(self) -> Optional[str]:
+        """Return the value of ``gateway_id`` under its product-terminology name.
+
+        Returns:
+            Optional[str]: The gateway ID, or None when the record has no gateway.
+        """
+        return getattr(self, "gateway_id", None)
+
+
+class RequiredMcpServerIdResponseMixin(BaseModelWithConfigDict):
+    """Response mixin that emits ``mcp_server_id`` next to a required ``gateway_id``.
+
+    The alias is non-null, so the OpenAPI type of ``mcpServerId`` matches ``gatewayId``.
+    The subclass declares ``gateway_id`` as ``str``.
+    """
+
+    @computed_field(description="Product-terminology alias of gateway_id")  # type: ignore[prop-decorator]
+    @property
+    def mcp_server_id(self) -> str:
+        """Return the value of ``gateway_id`` under its product-terminology name.
+
+        Returns:
+            str: The gateway ID.
+        """
+        return str(getattr(self, "gateway_id"))
 
 
 def _reject_conflicting_aliases(data: Any, *spellings: str) -> Any:
@@ -2150,7 +2188,7 @@ class ToolUpdate(BaseModelWithConfigDict):
         return _validate_header_mapping_targets(v)
 
 
-class ToolRead(BaseModelWithConfigDict):
+class ToolRead(McpServerIdResponseMixin):
     """Schema for reading tool information.
 
     Includes all tool fields plus:
@@ -2865,7 +2903,7 @@ class ResourceUpdate(BaseModelWithConfigDict):
         return v
 
 
-class ResourceRead(BaseModelWithConfigDict):
+class ResourceRead(McpServerIdResponseMixin):
     """Schema for reading resource information.
 
     Includes all resource fields plus:
@@ -3473,7 +3511,7 @@ class PromptUpdate(BaseModelWithConfigDict):
         return v
 
 
-class PromptRead(BaseModelWithConfigDict):
+class PromptRead(McpServerIdResponseMixin):
     """Schema for reading prompt information.
 
     Includes all prompt fields plus:
@@ -4488,6 +4526,11 @@ class GatewayRead(BaseModelWithConfigDict):
         None, description="OAuth 2.0 configuration including grant_type, client_id, encrypted client_secret, URLs, scopes, audience (for Atlassian/Auth0), and resource (RFC 8707)"
     )
 
+    registration_method: Optional[str] = Field(
+        None,
+        description="How the gateway registered as an OAuth client: auto, cimd, or dcr. Mirrors oauth_config.registration_method; null when none is recorded",
+    )
+
     # Query Parameter Authentication (masked for security)
     auth_query_param_key: Optional[str] = Field(
         None,
@@ -4606,6 +4649,17 @@ class GatewayRead(BaseModelWithConfigDict):
                     data_dict["auth_query_param_value_masked"] = settings.masked_auth_value
                 return data_dict
         return data
+
+    @model_validator(mode="after")
+    def _populate_registration_method(self) -> Self:
+        """Mirror ``oauth_config.registration_method`` into the top-level read field.
+
+        Returns:
+            Self: The instance with ``registration_method`` set from ``oauth_config``.
+        """
+        method = self.oauth_config.get("registration_method") if isinstance(self.oauth_config, dict) else None
+        self.registration_method = method if isinstance(method, str) else None
+        return self
 
     # This will be the main method to automatically populate fields
     @model_validator(mode="after")
@@ -4788,7 +4842,7 @@ class GatewayRead(BaseModelWithConfigDict):
         return GatewayRead.model_validate(masked_data)
 
 
-class GatewayRefreshResponse(BaseModelWithConfigDict):
+class GatewayRefreshResponse(RequiredMcpServerIdResponseMixin):
     """Response schema for manual gateway refresh API.
 
     Contains counts of added, updated, and removed items for tools, resources, and prompts,
@@ -4819,7 +4873,7 @@ class GatewayImpactServer(BaseModelWithConfigDict):
     name: str = Field(..., description="Name of the affected virtual server")
 
 
-class GatewayImpactPreview(BaseModelWithConfigDict):
+class GatewayImpactPreview(RequiredMcpServerIdResponseMixin):
     """Layer-1-scoped preview of virtual servers affected by gateway deletion."""
 
     gateway_id: str = Field(..., description="ID of the gateway being evaluated")
@@ -5801,6 +5855,126 @@ class TopPerformer(BaseModelWithConfigDict):
 # --- A2A Agent Schemas ---
 
 
+MAX_A2A_AGENT_SKILLS = 100
+MAX_A2A_SKILL_TAGS = 50
+
+
+class A2AAgentSkill(BaseModel):
+    """A skill an A2A agent advertises on its Agent Card.
+
+    Attributes:
+        id (str): Unique skill identifier.
+        name (str): Human-readable skill name.
+        description (str): What the skill does.
+        tags (List[str]): Keywords describing the skill.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(..., min_length=1, max_length=SecurityValidator.MAX_NAME_LENGTH, description="Unique skill identifier")
+    name: str = Field(..., min_length=1, max_length=SecurityValidator.MAX_NAME_LENGTH, description="Human-readable skill name")
+    description: str = Field(..., max_length=SecurityValidator.MAX_DESCRIPTION_LENGTH, description="What the skill does")
+    tags: List[str] = Field(..., max_length=MAX_A2A_SKILL_TAGS, description="Keywords describing the skill")
+
+    @field_validator("id", "name")
+    @classmethod
+    def validate_display_text(cls, v: str, info: ValidationInfo) -> str:
+        """Reject markup in skill identifiers and names.
+
+        Args:
+            v (str): Value to validate.
+            info (ValidationInfo): Field context.
+
+        Returns:
+            str: Sanitized value.
+
+        Examples:
+            >>> A2AAgentSkill(id="a", name="Summarize", description="d", tags=[]).name
+            'Summarize'
+            >>> try:
+            ...     A2AAgentSkill(id="a", name="<script>alert(1)</script>", description="d", tags=[])
+            ... except ValueError as e:
+            ...     "HTML tags" in str(e)
+            True
+        """
+        return SecurityValidator.sanitize_display_text(v, f"Skill {info.field_name}")
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        """Reject markup in the skill description.
+
+        Args:
+            v (str): Value to validate.
+
+        Returns:
+            str: Sanitized value.
+        """
+        return SecurityValidator.sanitize_display_text(v, "Skill description")
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: List[str]) -> List[str]:
+        """Reject markup and oversized entries in skill tags.
+
+        Args:
+            v (List[str]): Value to validate.
+
+        Returns:
+            List[str]: Sanitized tags.
+
+        Raises:
+            ValueError: When a tag exceeds the name length limit.
+        """
+        for tag in v:
+            if len(tag) > SecurityValidator.MAX_NAME_LENGTH:
+                raise ValueError(f"Skill tag exceeds {SecurityValidator.MAX_NAME_LENGTH} characters")
+        return [SecurityValidator.sanitize_display_text(tag, "Skill tag") for tag in v]
+
+    @model_validator(mode="after")
+    def validate_extra_depth(self) -> "A2AAgentSkill":
+        """Limit the nesting depth of extra skill fields.
+
+        Returns:
+            A2AAgentSkill: The validated skill.
+        """
+        SecurityValidator.validate_json_depth(self.model_extra or {})
+        return self
+
+
+def validate_a2a_skills(skills: Optional[List[A2AAgentSkill]]) -> Optional[List[A2AAgentSkill]]:
+    """Validate the size and uniqueness of an agent skill list.
+
+    Args:
+        skills: Skills submitted with an agent create or update request.
+
+    Returns:
+        The skills unchanged.
+
+    Raises:
+        ValueError: When the list is too long or repeats a skill ``id``.
+
+    Examples:
+        >>> validate_a2a_skills(None) is None
+        True
+        >>> dup = [A2AAgentSkill(id="a", name="n", description="d", tags=[])] * 2
+        >>> validate_a2a_skills(dup)
+        Traceback (most recent call last):
+            ...
+        ValueError: Duplicate skill id: a
+    """
+    if skills is None:
+        return None
+    if len(skills) > MAX_A2A_AGENT_SKILLS:
+        raise ValueError(f"An agent can advertise at most {MAX_A2A_AGENT_SKILLS} skills")
+    seen: set[str] = set()
+    for skill in skills:
+        if skill.id in seen:
+            raise ValueError(f"Duplicate skill id: {skill.id}")
+        seen.add(skill.id)
+    return skills
+
+
 class A2AAgentCreate(BaseModel):
     """
     Schema for creating a new A2A (Agent-to-Agent) compatible agent.
@@ -5836,6 +6010,7 @@ class A2AAgentCreate(BaseModel):
     agent_type: str = Field(default="generic", description="Type of agent (e.g., 'openai', 'anthropic', 'custom')")
     protocol_version: str = Field(default="1.0", description="A2A protocol version supported")
     capabilities: Dict[str, Any] = Field(default_factory=dict, description="Agent capabilities and features")
+    skills: Optional[List[A2AAgentSkill]] = Field(default=None, description="Skills the agent advertises on its Agent Card")
     config: Dict[str, Any] = Field(default_factory=dict, description="Agent-specific configuration parameters")
     passthrough_headers: Optional[List[str]] = Field(default=None, description="List of headers allowed to be passed through from client to target")
     # Authorizations
@@ -5996,6 +6171,19 @@ class A2AAgentCreate(BaseModel):
             logger.info(f"Description too long, truncated to {SecurityValidator.MAX_DESCRIPTION_LENGTH} characters.")
             return SecurityValidator.sanitize_display_text(truncated, "Description")
         return SecurityValidator.sanitize_display_text(v, "Description")
+
+    @field_validator("skills")
+    @classmethod
+    def validate_skills(cls, v: Optional[List[A2AAgentSkill]]) -> Optional[List[A2AAgentSkill]]:
+        """Validate skill list size and id uniqueness.
+
+        Args:
+            v (Optional[List[A2AAgentSkill]]): Value to validate
+
+        Returns:
+            Optional[List[A2AAgentSkill]]: Value if validated as safe
+        """
+        return validate_a2a_skills(v)
 
     @field_validator("capabilities", "config")
     @classmethod
@@ -6178,6 +6366,7 @@ class A2AAgentUpdate(BaseModelWithConfigDict):
     agent_type: Optional[str] = Field(None, description="Type of agent")
     protocol_version: Optional[str] = Field(None, description="A2A protocol version supported")
     capabilities: Optional[Dict[str, Any]] = Field(None, description="Agent capabilities and features")
+    skills: Optional[List[A2AAgentSkill]] = Field(None, description="Skills the agent advertises on its Agent Card")
     config: Optional[Dict[str, Any]] = Field(None, description="Agent-specific configuration parameters")
     passthrough_headers: Optional[List[str]] = Field(default=None, description="List of headers allowed to be passed through from client to target")
     auth_type: Optional[str] = Field(None, description="Type of authentication")
@@ -6337,6 +6526,19 @@ class A2AAgentUpdate(BaseModelWithConfigDict):
             logger.info(f"Description too long, truncated to {SecurityValidator.MAX_DESCRIPTION_LENGTH} characters.")
             return SecurityValidator.sanitize_display_text(truncated, "Description")
         return SecurityValidator.sanitize_display_text(v, "Description")
+
+    @field_validator("skills")
+    @classmethod
+    def validate_skills(cls, v: Optional[List[A2AAgentSkill]]) -> Optional[List[A2AAgentSkill]]:
+        """Validate skill list size and id uniqueness.
+
+        Args:
+            v (Optional[List[A2AAgentSkill]]): Value to validate
+
+        Returns:
+            Optional[List[A2AAgentSkill]]: Value if validated as safe
+        """
+        return validate_a2a_skills(v)
 
     @field_validator("capabilities", "config")
     @classmethod
@@ -6551,6 +6753,7 @@ class A2AAgentRead(BaseModelWithConfigDict):
     agent_type: str
     protocol_version: str
     capabilities: Dict[str, Any]
+    skills: Optional[List[Dict[str, Any]]] = Field(default=None, description="Skills the agent advertises; falls back to capabilities.skills for older agents")
     config: Dict[str, Any]
     enabled: bool
     reachable: bool
@@ -6921,6 +7124,38 @@ class A2AInvocationResponse(BaseModel):
     result: Any = Field(default=None, description="Result payload forwarded from the agent")
     error: Any = Field(default=None, description="Error forwarded from the agent")
     id: Any = Field(default=None, description="Request id this response correlates to, omitted for notifications")
+
+
+class A2ATestRequest(BaseModel):
+    """Schema for the optional body of ``POST /v1/a2a/{agent_id}/test``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: Optional[str] = Field(None, max_length=4096, description="Test message. A neutral default is used when omitted or empty.")
+
+
+class A2ATestResponse(BaseModel):
+    """Schema for a successful ``POST /v1/a2a/{agent_id}/test`` response."""
+
+    success: bool = Field(True, description="Always true on success")
+    result: Any = Field(..., description="Agent response")
+    agent_name: str = Field(..., description="Name of the tested agent")
+    test_timestamp: float = Field(..., description="Unix timestamp of the test")
+
+
+class A2ATestError(BaseModel):
+    """Schema for the ``detail`` of a failed ``POST /v1/a2a/{agent_id}/test`` response."""
+
+    success: bool = Field(False, description="Always false on failure")
+    error: str = Field(..., description="Sanitized error message")
+    error_type: Literal["not_found", "agent_error", "agent_disabled", "validation_error", "internal_error"] = Field(..., description="Error classification")
+    agent_id: str = Field(..., description="ID of the agent that was tested")
+
+
+class A2ATestErrorResponse(BaseModel):
+    """Schema for the wire body of a failed ``POST /v1/a2a/{agent_id}/test`` response."""
+
+    detail: A2ATestError = Field(..., description="Failure envelope")
 
 
 class A2AInvokeResponse(A2AInvocationResponse):
@@ -7427,6 +7662,28 @@ class EmailUserResponse(BaseModel):
             locked_until=locked_until,
             is_locked=is_locked,
         )
+
+
+class FeatureFlags(BaseModel):
+    """Deployment feature flags readable by any authenticated user.
+
+    Attributes:
+        a2a: Whether A2A is enabled on this gateway.
+    """
+
+    a2a: bool = Field(description="Whether A2A is enabled on this gateway")
+
+
+class CurrentUserResponse(EmailUserResponse):
+    """Response schema for ``GET /auth/email/me``.
+
+    Adds deployment feature flags that any authenticated user may read.
+
+    Attributes:
+        features: Deployment feature flags.
+    """
+
+    features: FeatureFlags = Field(description="Deployment feature flags readable by any authenticated user")
 
 
 class AuthenticationResponse(BaseModel):

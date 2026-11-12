@@ -163,7 +163,7 @@ from mcpgateway.schemas import (
     ToolUpdate,
 )
 from mcpgateway.services.a2a_agent_plugin_binding_service import A2AAgentPluginBindingForbiddenError, A2AAgentPluginBindingNotFoundError, A2AAgentPluginBindingService
-from mcpgateway.services.a2a_service import A2AAgentError, A2AAgentNameConflictError, A2AAgentNotFoundError, A2AAgentService
+from mcpgateway.services.a2a_service import A2AAgentError, A2AAgentNameConflictError, A2AAgentNotFoundError, A2AAgentService, a2a_enabled, raise_if_a2a_disabled
 from mcpgateway.services.argon2_service import Argon2PasswordService
 from mcpgateway.services.audit_trail_service import get_audit_trail_service
 from mcpgateway.services.catalog_service import catalog_service, CatalogRegistrationPermissionError
@@ -882,8 +882,8 @@ resource_service: ResourceService = ResourceService()
 root_service: RootService = RootService()
 export_service: ExportService = ExportService()
 import_service: ImportService = ImportService()
-# Initialize A2A service only if A2A features are enabled
-a2a_service: Optional[A2AAgentService] = A2AAgentService() if settings.mcpgateway_a2a_enabled else None
+# Created only when A2A is enabled. A2A admin handlers call raise_if_a2a_disabled() first, so they treat it as present.
+a2a_service: A2AAgentService = typing_cast(A2AAgentService, A2AAgentService() if settings.mcpgateway_a2a_enabled else None)
 # Initialize gRPC service only if gRPC features are enabled AND grpcio is installed
 grpc_service_mgr: Optional[Any] = GrpcService() if (settings.mcpgateway_grpc_enabled and GRPC_AVAILABLE and GrpcService is not None) else None
 
@@ -1022,6 +1022,8 @@ _TOKEN_EXCHANGE_FORM_FIELDS: Dict[str, str] = {
     "oauth_actor_token_source": "actor_token_source",
     "oauth_actor_token_type": "actor_token_type",
 }
+
+_OAUTH_REGISTRATION_METHODS = ("auto", "cimd", "dcr")
 
 _DISCOVERY_OVERRIDE_FORM_FIELDS: Dict[str, str] = {
     "oauth_discovery_token_url": "token_url",
@@ -1166,6 +1168,7 @@ async def _assemble_oauth_config_from_fields(fields: Any, *, encrypt_secret: boo
     oauth_password = str(fields.get("oauth_password", ""))
     oauth_scopes_str = str(fields.get("oauth_scopes", ""))
     oauth_audience = str(fields.get("oauth_audience", "")).strip()
+    oauth_registration_method = str(fields.get("oauth_registration_method", "")).strip()
     oauth_resource = parse_oauth_resource_form(fields.get("oauth_resource")) if include_resource else None
     token_exchange_values = {config_key: str(fields.get(form_key, "")).strip() for form_key, config_key in _TOKEN_EXCHANGE_FORM_FIELDS.items()} if oauth_grant_type == "token-exchange" else {}
 
@@ -1211,6 +1214,8 @@ async def _assemble_oauth_config_from_fields(fields: Any, *, encrypt_secret: boo
             oauth_config["scopes"] = scopes
     if oauth_resource:
         oauth_config["resource"] = oauth_resource
+    if oauth_registration_method in _OAUTH_REGISTRATION_METHODS:
+        oauth_config["registration_method"] = oauth_registration_method
     oauth_config.update({key: value for key, value in token_exchange_values.items() if value})
     if oauth_grant_type == "token-exchange":
         discovery = await _assemble_discovery_from_fields(fields, encrypt_secret=encrypt_secret)
@@ -11652,6 +11657,7 @@ async def admin_a2a_partial_html(
         items depending on ``render``. The response contains JSON-serializable
         encoded a2a agent data when templates expect it.
     """
+    raise_if_a2a_disabled()
     LOGGER.debug(
         f"User {get_user_email(user)} requested a2a_agents HTML partial (page={page}, per_page={per_page}, include_inactive={include_inactive}, render={render}, gateway_id={gateway_id}, team_id={team_id})"
     )
@@ -11847,6 +11853,7 @@ async def admin_get_all_agent_ids(
             - "agent_ids": List[str] of accessible agent IDs.
             - "count": int number of IDs returned.
     """
+    raise_if_a2a_disabled()
     user_email = get_user_email(user)
     team_ids = await _get_user_team_ids(user, db)
 
@@ -11914,6 +11921,7 @@ async def admin_search_a2a_agents(
             - "agents": List[dict] where each dict has keys "id", "name", "description".
             - "count": int number of matched a2a agents returned.
     """
+    raise_if_a2a_disabled()
     user_email = get_user_email(user)
     search_query = _normalize_search_query(q)
     normalized_tags = _normalize_tags_query(tags)
@@ -17318,6 +17326,7 @@ async def admin_get_agent(
         >>> admin_get_agent.__name__
         'admin_get_agent'
     """
+    raise_if_a2a_disabled()
     LOGGER.debug(f"User {get_user_email(user)} requested details for agent ID {agent_id}")
     user_email = get_user_email(user)
     token_teams = get_token_teams_from_request(request)
@@ -17364,6 +17373,7 @@ async def admin_list_a2a_agents(
             - links: Pagination links (optional)
 
     Raises:
+        HTTPException (404): ``detail.error == "a2a_disabled"`` when A2A is disabled.
         HTTPException (500): If an error occurs while retrieving the agent list.
 
     Examples:
@@ -17372,15 +17382,7 @@ async def admin_list_a2a_agents(
         >>> admin_list_a2a_agents.__name__
         'admin_list_a2a_agents'
     """
-    if a2a_service is None:
-        LOGGER.warning("A2A features are disabled, returning empty paginated response")
-        # First-Party
-
-        return {
-            "data": [],
-            "pagination": PaginationMeta(page=page, per_page=per_page, total_items=0, total_pages=0, has_next=False, has_prev=False).model_dump(),
-            "links": None,
-        }
+    raise_if_a2a_disabled()
 
     LOGGER.debug(f"User {get_user_email(user)} requested A2A Agent list (page={page}, per_page={per_page})")
     user_email = get_user_email(user)
@@ -17426,12 +17428,7 @@ async def admin_add_a2a_agent(
     """
     LOGGER.info(f"A2A agent creation request from user {user}")
 
-    if not a2a_service or not settings.mcpgateway_a2a_enabled:
-        LOGGER.warning("A2A agent creation attempted but A2A features are disabled")
-        return ORJSONResponse(
-            content={"message": "A2A features are disabled!", "success": False},
-            status_code=403,
-        )
+    raise_if_a2a_disabled()
 
     form = await request.form()
     team_id = _form_team_id(form)
@@ -17626,6 +17623,7 @@ async def admin_edit_a2a_agent(
         JSONResponse: A JSON response indicating success or failure.
 
     Raises:
+        HTTPException: 404 with ``detail.error == "a2a_disabled"`` if A2A is disabled.
         HTTPException: 422 when public visibility is disabled and request is team-scoped.
 
     Examples:
@@ -17634,6 +17632,7 @@ async def admin_edit_a2a_agent(
         >>> admin_edit_a2a_agent.__name__
         'admin_edit_a2a_agent'
     """
+    raise_if_a2a_disabled()
 
     try:
         form = await request.form()
@@ -17834,7 +17833,7 @@ async def admin_set_a2a_agent_state(
     Raises:
         HTTPException: If A2A features are disabled
     """
-    if not a2a_service or not settings.mcpgateway_a2a_enabled:
+    if not a2a_enabled():
         root_path = _resolve_root_path(request)
         return RedirectResponse(f"{root_path}/admin#a2a-agents", status_code=303)
 
@@ -17888,7 +17887,7 @@ async def admin_delete_a2a_agent(
     Raises:
         HTTPException: If A2A features are disabled
     """
-    if not a2a_service or not settings.mcpgateway_a2a_enabled:
+    if not a2a_enabled():
         root_path = _resolve_root_path(request)
         return RedirectResponse(f"{root_path}/admin#a2a-agents", status_code=303)
 
@@ -17954,83 +17953,43 @@ async def admin_test_a2a_agent(
         - agent_id: ID of the agent that was tested
 
     Raises:
-        HTTPException: If A2A features are disabled (403)
+        HTTPException: 404 with ``detail.error == "a2a_disabled"`` if A2A is disabled
 
     Note:
         Error messages are sanitized by a2a_service to prevent credential leakage.
         Returns 404 (not 403) for access denied to avoid leaking agent existence.
     """
-    if not a2a_service or not settings.mcpgateway_a2a_enabled:
-        return ORJSONResponse(content={"success": False, "error": "A2A features are disabled"}, status_code=403)
+    raise_if_a2a_disabled()
 
+    user_email = get_user_email(user)
+    is_admin = user.get("is_admin", False) if isinstance(user, dict) else False
+    token_teams = user.get("token_teams") if isinstance(user, dict) else None
+    # Missing token_teams key for non-admin = public-only (per normalize_token_teams rules).
+    # Only admin users retain None (admin bypass); all others default to [].
+    if not is_admin and token_teams is None:
+        token_teams = []
+    # Admin users with unrestricted tokens get full bypass (both None);
+    # non-admin users pass their actual email and team scoping.
+    invoke_user_email = None if (is_admin and token_teams is None) else user_email
+
+    default_message = "Hello from ContextForge Admin UI test!"
     try:
-        user_email = get_user_email(user)
-        is_admin = user.get("is_admin", False) if isinstance(user, dict) else False
-        token_teams = user.get("token_teams") if isinstance(user, dict) else None
-        # Missing token_teams key for non-admin = public-only (per normalize_token_teams rules).
-        # Only admin users retain None (admin bypass); all others default to [].
-        if not is_admin and token_teams is None:
-            token_teams = []
-        # Admin users with unrestricted tokens get full bypass (both None);
-        # non-admin users pass their actual email and team scoping.
-        invoke_user_email = None if (is_admin and token_teams is None) else user_email
-        # Get the agent by ID
-        agent = await a2a_service.get_agent(db, agent_id, user_email=invoke_user_email, token_teams=token_teams)
+        body = await _read_request_json(request)
+        user_query = (body.get("query") if body else None) or default_message
+    except Exception:
+        user_query = default_message
 
-        # Parse request body to get user-provided query
-        default_message = "Hello from ContextForge Admin UI test!"
-        try:
-            body = await _read_request_json(request)
-            # Use 'or' to also handle empty string queries
-            user_query = (body.get("query") if body else None) or default_message
-        except Exception:
-            user_query = default_message
-
-        # Prepare test parameters based on agent type and endpoint
-        if agent.agent_type in ["generic", "jsonrpc"] or agent.endpoint_url.endswith("/"):
-            # Let the A2A protocol helper choose v1 or legacy wire format from the agent record.
-            test_params = {"query": user_query}
-        else:
-            # Generic test format
-            test_params = {"query": user_query, "message": user_query, "test": True, "timestamp": int(time.time())}
-
-        # Invoke the agent
-        result = await a2a_service.invoke_agent(
-            db,
-            agent.name,
-            test_params,
-            "admin_test",
-            user_email=invoke_user_email,
-            user_id=user_email,
-            token_teams=token_teams,
-        )
-
-        return ORJSONResponse(content={"success": True, "result": result, "agent_name": agent.name, "test_timestamp": time.time()})
-
-    except A2AAgentNotFoundError as e:
-        LOGGER.warning(f"A2A agent not found or access denied for {agent_id}: {e}")
-        return ORJSONResponse(
-            content={"success": False, "error": str(e), "error_type": "not_found", "agent_id": agent_id},
-            status_code=404,
-        )
-    except A2AAgentError as e:
-        LOGGER.error(f"A2A agent error for {agent_id}: {e}")
-        return ORJSONResponse(
-            content={"success": False, "error": str(e), "error_type": "agent_error", "agent_id": agent_id},
-            status_code=502,
-        )
-    except ValidationError as e:
-        LOGGER.warning(f"Validation error testing A2A agent {agent_id}: {e}")
-        return ORJSONResponse(
-            content={"success": False, "error": ErrorFormatter.format_validation_error(e)["message"], "error_type": "validation_error", "agent_id": agent_id},
-            status_code=422,
-        )
-    except Exception as e:
-        LOGGER.error(f"Unexpected error testing A2A agent {agent_id}: {e}")
-        return ORJSONResponse(
-            content={"success": False, "error": unexpected_error_detail(e), "error_type": "internal_error", "agent_id": agent_id},
-            status_code=500,
-        )
+    outcome = await a2a_service.test_agent(
+        db,
+        agent_id,
+        query=user_query,
+        interaction_type="admin_test",
+        user_email=invoke_user_email,
+        user_id=user_email,
+        token_teams=token_teams,
+        include_agent_error_detail=True,
+    )
+    return ORJSONResponse(content=outcome.body, status_code=outcome.status_code)
 
 
 # gRPC Service Management Endpoints
@@ -18645,6 +18604,7 @@ async def get_a2a_plugin_bindings_partial(
     Returns:
         HTMLResponse with rendered partial template.
     """
+    raise_if_a2a_disabled()
     LOGGER.debug(f"User {get_user_email(user)} requested A2A plugin bindings partial")
 
     try:
@@ -18694,6 +18654,7 @@ async def admin_create_a2a_plugin_binding(
 
     Returns the refreshed partial on success or an error HTML fragment.
     """
+    raise_if_a2a_disabled()
     try:
         form = await request.form()
         team_id = form.get("team_id", "")
@@ -18773,6 +18734,7 @@ async def admin_delete_a2a_plugin_binding(
     POST endpoint (HTMX-compatible) that deletes a binding and returns
     the refreshed partial.
     """
+    raise_if_a2a_disabled()
     try:
         # Validate that binding_id is a valid UUID
         try:
