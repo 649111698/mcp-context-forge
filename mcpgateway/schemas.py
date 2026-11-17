@@ -377,6 +377,9 @@ def _mask_sigv4_config(sigv4_config: Any) -> Any:
     return {key: (settings.masked_auth_value if key in SIGV4_SENSITIVE_KEYS and value else value) for key, value in sigv4_config.items()}
 
 
+_MAX_TOKEN_ISSUERS = 5
+
+
 def _validate_oauth_config_urls(v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Validate URL-bearing OAuth config entries against core URL/SSRF rules.
 
@@ -405,6 +408,13 @@ def _validate_oauth_config_urls(v: Optional[Dict[str, Any]]) -> Optional[Dict[st
         if not isinstance(raw_value, str):
             raise ValueError(f"oauth_config.{field_name} must be a string URL")
         validate_core_url(raw_value, f"OAuth config {field_name}")
+    raw_token_issuer = v.get("token_issuer")
+    if raw_token_issuer not in (None, ""):
+        token_issuers = raw_token_issuer if isinstance(raw_token_issuer, list) else [raw_token_issuer]
+        if not token_issuers or len(token_issuers) > _MAX_TOKEN_ISSUERS or not all(isinstance(item, str) and item for item in token_issuers):
+            raise ValueError(f"oauth_config.token_issuer must be a URL string or a list of 1-{_MAX_TOKEN_ISSUERS} URL strings")
+        for item in token_issuers:
+            validate_core_url(item, "OAuth config token_issuer")
     _validate_oauth_discovery(v.get("discovery"))
     _validate_oauth_actor_token(v)
     if "redirect_uri_after_oauth" in v:
@@ -6123,6 +6133,18 @@ def validate_a2a_card_path(path: str) -> str:
     return path
 
 
+class A2AStoredCardRead(BaseModelWithConfigDict):
+    """The current stored Agent Card of a registered agent, as fetched."""
+
+    version: int = Field(..., description="Stored card version, starting at 1")
+    card: Dict[str, Any] = Field(..., description="Card document as fetched")
+    detected_version: str = Field(..., description="Card format version detected at fetch time: 1.0 or 0.3")
+    source_url: str = Field(..., description="URL the card was fetched from")
+    etag: Optional[str] = Field(None, description="ETag returned with the card")
+    max_age: Optional[int] = Field(None, description="Cache-Control max-age in seconds returned with the card")
+    fetched_at: datetime = Field(..., description="When the card was fetched")
+
+
 class A2AFetchCardRequest(BaseModelWithConfigDict):
     """Request to fetch an A2A Agent Card from an endpoint that is not yet registered."""
 
@@ -6206,6 +6228,8 @@ class A2AFetchCardResponse(BaseModelWithConfigDict):
     raw_card: Optional[Dict[str, Any]] = Field(None, description="Card as fetched; omitted when identical to card")
     suggested_agent: Optional[Dict[str, Any]] = Field(None, description="Suggested A2AAgentCreate fields derived from the card")
     warnings: List[str] = Field(default_factory=list, description="Notes on card content that ContextForge could not map")
+    etag: Optional[str] = Field(None, description="ETag the agent returned with the card")
+    max_age: Optional[int] = Field(None, description="Cache-Control max-age in seconds the agent returned with the card")
 
 
 class A2AAgentCreate(BaseModel):
@@ -6306,6 +6330,10 @@ class A2AAgentCreate(BaseModel):
     uaid_skills: Optional[list[int]] = Field(default_factory=list, description="Skill IDs for UAID hash generation (deterministic identity)")
     version: Optional[str] = Field(default="1.0.0", description="Agent version for UAID generation")
     uaid_native_id_override: Optional[str] = Field(None, description="Override nativeId in UAID for cross-gateway routing (defaults to endpoint_url if not provided)")
+    card_url: Optional[str] = Field(
+        None,
+        description="Agent Card endpoint or card URL. The gateway fetches the card itself and stores it as fetched; a card supplied by the client is never accepted. Registration fails when no card is found",
+    )
 
     @field_validator("passthrough_headers")
     @classmethod

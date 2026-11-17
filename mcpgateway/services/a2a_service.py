@@ -20,14 +20,14 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 import uuid
 
 # Third-Party
 from fastapi import HTTPException
 import httpx
-from pydantic import ValidationError
+from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 from sqlalchemy import and_, case, delete, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -37,13 +37,15 @@ from mcpgateway.cache.a2a_stats_cache import a2a_stats_cache
 from mcpgateway.common.validators import SecurityValidator
 from mcpgateway.config import settings
 from mcpgateway.db import A2AAgent as DbA2AAgent
+from mcpgateway.db import A2AAgentCard
 from mcpgateway.db import A2AAgentMetric, A2AAgentMetricsHourly, A2ATask, EmailTeam
 from mcpgateway.db import EmailTeamMember as DbEmailTeamMember
 from mcpgateway.db import fresh_db_session, get_for_update, server_tool_association
 from mcpgateway.db import Tool as DbTool
 from mcpgateway.observability import create_span, inject_trace_context_headers, set_span_attribute, set_span_error
 from mcpgateway.plugins.utils import build_request_extensions, record_plugin_metrics
-from mcpgateway.schemas import A2AAgentAggregateMetrics, A2AAgentCreate, A2AAgentMetrics, A2AAgentRead, A2AAgentUpdate, A2ATestError
+from mcpgateway.schemas import A2AAgentAggregateMetrics, A2AAgentCreate, A2AAgentMetrics, A2AAgentRead, A2AAgentUpdate, A2AFetchCardRequest, A2AFetchCardResponse, A2AStoredCardRead, A2ATestError
+from mcpgateway.services.a2a_card_import import fetch_agent_card
 from mcpgateway.services.a2a_protocol import dump_agent_skills, get_agent_skills, is_terminal_task_state, is_v1_a2a_protocol, prepare_a2a_invocation, prepare_pinned_a2a_invocation, resolve_a2a_headers
 from mcpgateway.services.base_service import BaseService
 from mcpgateway.services.encryption_service import protect_oauth_config_for_storage
@@ -395,6 +397,89 @@ async def resolve_a2a_oauth_authorization(agent_id: str, agent_name: str, oauth_
     finally:
         if not lock.locked():
             _A2A_OAUTH_ACQUIRE_LOCKS.pop(cache_key, None)
+
+
+# Strong references to in-flight invalidation tasks. The event loop only keeps a
+# weak reference to a task, so without this a fire-and-forget task can be garbage
+# collected before it completes.
+_BACKGROUND_TASKS: Set["asyncio.Task[None]"] = set()
+
+
+def _log_invalidation_task_exception(task: "asyncio.Task[None]") -> None:
+    """Log an exception raised inside a background invalidation task.
+
+    `_publish_a2a_invalidation()` handles its own errors, so this callback is a guard
+    against unexpected failures and does not log in normal operation.
+
+    Args:
+        task: The completed invalidation task.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("A2A cache invalidation task failed: %s", exc)
+
+
+def _schedule_a2a_invalidation(agent_name: str) -> None:
+    """Schedule a best-effort A2A cache invalidation publish.
+
+    The coroutine is constructed only after a running loop is confirmed and the
+    task is retained until completion, so a scheduling failure cannot leak an
+    un-awaited coroutine and a live task cannot be garbage collected early.
+
+    Args:
+        agent_name: Name of the agent whose cache entry should be invalidated.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # No running event loop (e.g., in tests)
+
+    coro = _publish_a2a_invalidation("agent", name=agent_name)
+    try:
+        task = loop.create_task(coro)
+    except Exception as exc:  # pylint: disable=broad-except
+        coro.close()
+        logger.warning("Rust-cache invalidation scheduling failed for agent %s: %s", agent_name, exc)
+        return
+
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    task.add_done_callback(_log_invalidation_task_exception)
+
+
+def _same_origin(url: AnyHttpUrl, other: Optional[str]) -> bool:
+    """Return whether a normalized URL and another URL share scheme, host, and port.
+
+    Both URLs go through the same WHATWG parser the card fetch uses, so a URL
+    that the fetch resolves to another host never matches.
+
+    Args:
+        url: Normalized URL that the card fetch uses.
+        other: Second URL, or ``None``.
+
+    Returns:
+        ``True`` when both URLs have the same origin.
+
+    Examples:
+        >>> from pydantic import AnyHttpUrl
+        >>> _same_origin(AnyHttpUrl("https://a.example.com/card"), "https://a.example.com:443/rpc")
+        True
+        >>> _same_origin(AnyHttpUrl("https://a.example.com"), "https://b.example.com")
+        False
+        >>> _same_origin(AnyHttpUrl("https://a.example.com"), None)
+        False
+        >>> _same_origin(AnyHttpUrl("https://evil.example\\\\@a.example.com/card"), "https://a.example.com/rpc")
+        False
+    """
+    if not other:
+        return False
+    try:
+        endpoint = TypeAdapter(AnyHttpUrl).validate_python(other)
+    except ValidationError:
+        return False
+    return (url.scheme, url.host, url.port) == (endpoint.scheme, endpoint.host, endpoint.port)
 
 
 class A2AAgentError(Exception):
@@ -908,6 +993,7 @@ class A2AAgentService(BaseService):
         Examples:
             # TODO
         """
+        fetched_card = await self._fetch_registration_card(agent_data.card_url, getattr(agent_data, "auth_type", None), getattr(agent_data, "auth_value", None), str(agent_data.endpoint_url))
         with create_span(
             "a2a.register",
             {
@@ -1068,6 +1154,9 @@ class A2AAgentService(BaseService):
                 db.commit()
                 db.refresh(new_agent)
 
+                if fetched_card is not None:
+                    self._store_agent_card(db, new_agent, fetched_card)
+
                 # Invalidate caches since agent count changed
                 # Wrapped in try/except to ensure cache failures don't fail the request
                 # when the agent is already successfully committed
@@ -1087,16 +1176,7 @@ class A2AAgentService(BaseService):
                 except Exception as cache_error:
                     logger.warning("Cache invalidation failed after agent commit: %s", cache_error)
 
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(_publish_a2a_invalidation("agent", name=new_agent.name))
-                except RuntimeError:
-                    pass  # No running event loop (e.g., in tests)
-                except Exception as exc:
-                    # Best-effort, but log so a Redis outage stops being
-                    # invisible — stale Rust L1 caches silently serve old
-                    # agent data until TTL expires.
-                    logger.warning("Rust-cache invalidation scheduling failed for agent %s: %s", new_agent.name, exc)
+                _schedule_a2a_invalidation(new_agent.name)
 
                 # Automatically create a tool for the A2A agent if not already present
                 # Tool creation is wrapped in try/except to ensure agent registration succeeds
@@ -1175,6 +1255,95 @@ class A2AAgentService(BaseService):
                 set_span_error(span, e)
                 db.rollback()
                 raise A2AAgentError(f"Failed to register A2A agent: {unexpected_error_detail(e)}")
+
+    @staticmethod
+    async def _fetch_registration_card(
+        card_url: Optional[str], auth_type: Optional[str] = None, auth_value: Optional[str] = None, endpoint_url: Optional[str] = None
+    ) -> Optional[A2AFetchCardResponse]:
+        """Fetch the Agent Card named by ``card_url`` before any write happens.
+
+        The registration credentials of types ``basic``, ``bearer`` and ``authheaders`` go to the
+        card URL only when it shares an origin with ``endpoint_url``. A mistyped or hostile
+        ``card_url`` on another origin never receives them.
+
+        Args:
+            card_url: Agent endpoint or card URL from the registration request, or ``None``.
+            auth_type: Authentication type of the registration request.
+            auth_value: Encoded authentication value of the registration request.
+            endpoint_url: Agent endpoint URL of the registration request.
+
+        Returns:
+            The fetched card, or ``None`` when registration names no card.
+
+        Raises:
+            A2AAgentError: If a card URL is given and no valid card is found there.
+        """
+        if not card_url:
+            return None
+        card_base_url = A2AFetchCardRequest(base_url=card_url).base_url
+        headers: Optional[Dict[str, str]] = None
+        if auth_type in ("basic", "bearer", "authheaders") and auth_value and _same_origin(card_base_url, endpoint_url):
+            headers = {str(key): str(value) for key, value in decode_auth(auth_value).items()}
+        request = A2AFetchCardRequest(base_url=card_base_url, headers=headers)
+        fetched = await fetch_agent_card(str(request.base_url), None, request.headers)
+        if fetched.found:
+            return fetched
+        if fetched.outcome == "auth_required":
+            raise A2AAgentError("The Agent Card requires credentials. Supply valid credentials for the card URL.")
+        if fetched.outcome == "unreachable":
+            raise A2AAgentError("The Agent Card URL could not be reached")
+        raise A2AAgentError("No A2A Agent Card was found at the given card URL")
+
+    @staticmethod
+    def _store_agent_card(db: Session, agent: DbA2AAgent, fetched: A2AFetchCardResponse) -> None:
+        """Store the card as fetched as the next version for ``agent``.
+
+        A storage failure is logged and does not undo the committed agent.
+
+        Args:
+            db: Database session.
+            agent: The registered agent row.
+            fetched: The fetched card. ``raw_card`` is ``None`` for a card already in the 1.0 shape, so ``card`` is the document as fetched.
+        """
+        try:
+            latest = db.execute(select(func.max(A2AAgentCard.version)).where(A2AAgentCard.a2a_agent_id == agent.id)).scalar()
+            db.add(
+                A2AAgentCard(
+                    a2a_agent_id=agent.id,
+                    version=(latest or 0) + 1,
+                    card=fetched.raw_card if fetched.raw_card is not None else fetched.card,
+                    detected_version=fetched.detected_version,
+                    source_url=fetched.source_url,
+                    etag=fetched.etag,
+                    max_age=fetched.max_age,
+                )
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning("Failed to store Agent Card for A2A agent %s", agent.id, exc_info=True)
+
+    async def get_stored_card(
+        self,
+        db: Session,
+        agent_id: str,
+        user_email: Optional[str] = None,
+        token_teams: Optional[List[str]] = None,
+    ) -> Optional[A2AStoredCardRead]:
+        """Return the current stored Agent Card of a visible agent.
+
+        Args:
+            db: Database session.
+            agent_id: Agent ID.
+            user_email: Requester email for visibility checks.
+            token_teams: Token team scope for visibility checks.
+
+        Returns:
+            The highest stored card version, or ``None`` when the agent has no stored card.
+        """
+        await self.get_agent(db, agent_id, user_email=user_email, token_teams=token_teams)
+        row = db.execute(select(A2AAgentCard).where(A2AAgentCard.a2a_agent_id == agent_id).order_by(A2AAgentCard.version.desc()).limit(1)).scalar_one_or_none()
+        return A2AStoredCardRead.model_validate(row) if row else None
 
     async def list_agents(
         self,
@@ -2082,13 +2251,7 @@ class A2AAgentService(BaseService):
 
             await admin_stats_cache.invalidate_tags()
 
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(_publish_a2a_invalidation("agent", name=agent.name))
-            except RuntimeError:
-                pass  # No running event loop (e.g., in tests)
-            except Exception as exc:
-                logger.warning("Rust-cache invalidation scheduling failed for agent %s: %s", agent.name, exc)
+            _schedule_a2a_invalidation(agent.name)
 
             # Update the associated tool if it exists
             # Wrap in try/except to handle tool sync failures gracefully - the agent
@@ -2294,13 +2457,7 @@ class A2AAgentService(BaseService):
 
                 await admin_stats_cache.invalidate_tags()
 
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(_publish_a2a_invalidation("agent", name=agent_name))
-                except RuntimeError:
-                    pass  # No running event loop (e.g., in tests)
-                except Exception as exc:
-                    logger.warning("Rust-cache invalidation scheduling failed for agent %s: %s", agent_name, exc)
+                _schedule_a2a_invalidation(agent_name)
 
                 logger.info("Deleted A2A agent: %s (ID: %s)", agent_name, agent_id)
 
